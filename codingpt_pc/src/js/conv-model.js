@@ -1,5 +1,7 @@
 import * as i18n from './i18n/index.js';
-import { TOOL_GROUP_MIN, isVisible } from './chat-model.js';
+import { isVisible } from './chat-model.js';
+/** 끝난 도구가 몇 개 이어지면 한 줄로 접는가 — 앱 convModel.CONV_GROUP_MIN 과 같다(Claude 앱 문법: 2개부터). */
+export const CONV_GROUP_MIN = 2;
 // conv-model.js — 채팅 v2(구조화 대화) "규칙" 한 벌. DOM 도 api 도 모르는 순수 모듈.
 //
 // 계약 정본 = codingpt_daemon/docs/chat-v2-design.md (§2 데이터 모델 · §3 push · §4 RPC · §10 클라 규칙).
@@ -609,10 +611,14 @@ export function buildRows(st, opts) {
   items.sort((a, b) => a.at - b.at);
 
   const flat = [];
+  // 턴의 에이전트 말 — 턴 끝 줄의 [복사]·[읽어 주기] 대상. 사람이 말하면 새로 센다(앱 buildItems 와 같은 규칙).
+  let said = [];
   for (const it of items) {
     if (it.turn) {
       const s = turnSummary(it.turn);
-      if (s) flat.push({ type: 'turn', key: 't:' + it.turn.turn, sig: String(it.turn.endSeq), ...s });
+      const text = said.join('\n\n').trim();
+      said = [];
+      if (s || text) flat.push({ type: 'turn', key: 't:' + it.turn.turn, sig: String(it.turn.endSeq), ...(s || {}), text });
       continue;
     }
     if (it.notice) {
@@ -629,7 +635,8 @@ export function buildRows(st, opts) {
       flat.push({ type: 'orphan', key: m.key, sig: String(m.seq), msg: m, sub: !!m.parent });
       continue;
     }
-    if (!isVisible(m)) continue;
+    // 생각은 본문이 비어 와도(서명만 — 실측상 대부분) "N초 동안 생각함" 한 줄로 남긴다(앱과 같다).
+    if (m.kind !== 'thinking' && !isVisible(m)) continue;
     if (m.role === 'user' && m.kind === 'compact') continue;
     if (m.role === 'user' && (m.kind === 'text' || m.kind === 'slash') && HARNESS_MARK.test(String(m.text || ''))) continue;   // 하네스 기계 메시지 — 이미 저장된 옛 대화에도
     if (m.kind === 'tool_use' || m.kind === 'question') {
@@ -646,10 +653,12 @@ export function buildRows(st, opts) {
     if (m.role === 'user' && (m.kind === 'text' || m.kind === 'slash')) {
       const status = m.status === 'failed' && blockedAt.has(m.seq) ? 'blocked' : (m.status || 'sent');
       flat.push({ type: 'user', key: m.key, sig: `${m.seq}|${status}`, msg: m, status });
+      said = [];
       continue;
     }
     if (m.role === 'assistant' && m.kind === 'text') {
       flat.push({ type: 'assistant', key: m.key, sig: String(m.seq), msg: m, sub: !!m.parent });
+      if (!m.parent && m.text) said.push(String(m.text));
       continue;
     }
     if (m.kind === 'agent_report') {
@@ -663,6 +672,16 @@ export function buildRows(st, opts) {
     flat.push({ type: 'divider', key: m.key, sig: String(m.seq), msg: m });
   }
 
+  // ②' 생각한 시간 — 생각 줄 시각 → 바로 다음 줄 시각("N초 동안 생각함").
+  for (let i = 0; i < flat.length; i++) {
+    const r = flat[i];
+    if (r.type !== 'thinking') continue;
+    const nx = flat[i + 1];
+    const t0 = Number(r.msg.at) || 0;
+    const t1 = nx && nx.msg ? Number(nx.msg.at) || 0 : 0;
+    if (t0 && t1 > t0) { r.dur = t1 - t0; r.sig += '|' + r.dur; }
+  }
+
   // ③ 끝난 도구 묶기 — v1 규칙 그대로(chat-view._regroupTools): 연속으로 끝난 도구가 TOOL_GROUP_MIN 개
   //    이상이면 한 줄로 접는다. 진행 중·질문·diff 가 붙은 편집·사용자가 펼쳐 둔 행은 묶지 않는다.
   //    '생각' 줄은 묶음을 끊지 않는다(도구 사이에 끼어 run 을 토막내면 하나도 안 접힌다).
@@ -670,7 +689,7 @@ export function buildRows(st, opts) {
   let run = [];
   const flush = () => {
     const tools = run.filter((r) => r.type === 'tool');
-    if (tools.length >= TOOL_GROUP_MIN) {
+    if (tools.length >= CONV_GROUP_MIN) {
       const key = 'g:' + run[0].key;
       if (openGroups.has(key)) rows.push(...run);
       else {
@@ -685,8 +704,7 @@ export function buildRows(st, opts) {
     run = [];
   };
   for (const r of flat) {
-    const foldable = r.type === 'tool' && !r.question && !!r.result
-      && !(r.result.result && r.result.result.patch) && !openTools.has(r.key);
+    const foldable = r.type === 'tool' && !r.question && !!r.result && !openTools.has(r.key);
     if (foldable) { run.push(r); continue; }
     if (r.type === 'thinking' && run.length) { run.push(r); continue; }
     flush();

@@ -283,7 +283,7 @@ const keys = (st) => M.buildRows(st).map((r) => r.type + ':' + r.key);
   eq([rows[1].count, rows[1].bad, rows[1].key], [4, 1, 'g:a'], '묶음 — 개수·실패 수·첫 도구 key');
   ok(rows[1].items.every((r) => r.result && r.result.key === 'r:' + r.key), '도구와 결과가 id 로 짝지어진다(결과는 독립 행이 아니다)');
   eq(M.buildRows(st, { openGroups: new Set(['g:a']) }).map((r) => r.type), ['user', 'tool', 'tool', 'tool', 'tool', 'assistant'], '펼친 묶음은 낱개로');
-  eq(M.buildRows(st, { openTools: new Set(['b']) }).map((r) => r.type), ['user', 'tool', 'tool', 'tool', 'tool', 'assistant'], '사용자가 펼쳐 둔 도구는 묶음을 끊는다(3개 미만은 안 묶는다)');
+  eq(M.buildRows(st, { openTools: new Set(['b']) }).map((r) => r.type), ['user', 'tool', 'tool', 'group', 'assistant'], '사용자가 펼쳐 둔 도구는 묶음을 끊는다(2개부터 묶는다 — CONV_GROUP_MIN)');
 
   // 진행 중인 도구는 묶지 않는다 / 생각 줄은 묶음을 끊지 않는다 / diff 는 묶지 않는다
   const st2 = M.createConv('t2');
@@ -298,8 +298,8 @@ const keys = (st) => M.buildRows(st).map((r) => r.type + ':' + r.key);
     ],
   });
   rows = M.buildRows(st2);
-  eq(rows.map((r) => r.type + (r.type === 'group' ? r.count : '')), ['group4', 'tool', 'tool'], '★ 생각 줄은 묶음을 끊지 않는다 · diff 와 진행 중 도구는 묶지 않는다');
-  eq(rows[2].result, null, '진행 중 = 결과 없음');
+  eq(rows.map((r) => r.type + (r.type === 'group' ? r.count : '')), ['group5', 'tool'], '★ 생각 줄은 묶음을 끊지 않는다 · diff 편집도 묶는다(상세는 도구 시트) · 진행 중 도구는 묶지 않는다');
+  eq(rows[1].result, null, '진행 중 = 결과 없음');
   eq(M.workingInfo(st2).title, 'Bash f', '작업 중 표시 = 결과가 아직 없는 마지막 도구');
 
   // 짝 없는 결과(도구 호출이 받아 둔 내역 밖)
@@ -658,5 +658,23 @@ const keys = (st) => M.buildRows(st).map((r) => r.type + ':' + r.key);
   if (types === 'report,report' && rows[0].msg.text === '완료했습니다.' && rows[0].msg.meta.from === 'abc') pass++; else { fail++; console.log('FAIL peer report rows', types); }
 }
 
+
+// ── 턴 끝 줄 = 복사·읽어 주기 대상 · 생각한 시간(앱 buildItems 와 같은 규칙) ──
+{
+  const st = M.createConv('tt');
+  M.applyOpen(st, { thread: { id: 'tt', state: 'idle' }, headSeq: 7, events: [
+    { seq: 1, ts: T0, op: 'turn', phase: 'start', turn: 1 }, uMsg(2, 'c1', 'sent'),
+    { seq: 3, ts: T0 + 1000, op: 'msg', msg: { key: 'th:1', role: 'assistant', kind: 'thinking', text: '' } },
+    { seq: 4, ts: T0 + 9000, op: 'msg', msg: { key: 'm:0', role: 'assistant', kind: 'text', text: '첫째' } },
+    aMsg(5, 'm:1', '둘째'),
+    { seq: 6, ts: T0 + 20000, op: 'turn', phase: 'end', turn: 1, durationMs: 20000 },
+  ] });
+  const rows = M.buildRows(st);
+  const th = rows.find((r) => r.type === 'thinking');
+  eq(th && th.dur, 8000, '생각 줄 dur = 다음 줄까지 걸린 시간');
+  const tr = rows.find((r) => r.type === 'turn');
+  eq(tr && tr.text, '첫째\n\n둘째', '턴 끝 줄 text = 그 턴의 에이전트 말(복사·읽어 주기)');
+  eq(M.CONV_GROUP_MIN, 2, '묶음 기준 = 앱과 같은 2');
+}
 console.log(`\n${fail === 0 ? 'ALL PASS' : 'FAILED'} — pass ${pass} / fail ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

@@ -9,7 +9,8 @@ import { renderMarkdown, escapeHtml } from "./chat-md.js";
 import {
   CHAT, toolLabel, resultMark, resultClass, resultMeta, patchLines, clampLines, toolRunLabel,
 } from "./chat-model.js";
-import { splitStreamBlocks, patchStreamTail, turnSummaryText, convErrorText, noticeText, fileMissingText, CONV } from "./conv-model.js";
+import { splitStreamBlocks, patchStreamTail, turnSummaryText, convErrorText, noticeText, fileMissingText, CONV, fmtDuration } from "./conv-model.js";
+import { ttsAvailable } from "./tts.js";
 import { basename } from "./path-utils.js";
 import * as i18n from './i18n/index.js';
 
@@ -215,15 +216,16 @@ export function paintThinkingLive(row, text) {
   if (body) body.textContent = t.length > CONV.THINKING_CHARS ? "…" + t.slice(-CONV.THINKING_CHARS) : t;
 }
 
-export function buildThinkingRow(m) {
+/** 끝난 생각 — "N초 동안 생각함". 본문(대개 비어 온다)이 있으면 눌러 펼친다. */
+export function buildThinkingRow(m, dur) {
   const text = String(m.text || "");
   const row = document.createElement("div");
-  row.className = "chat-thinking";
+  row.className = "conv-think" + (text.trim() ? " has" : "");
   row.dataset.key = m.key;
-  row.dataset.full = text;
-  row.dataset.collapsed = "1";
-  row.title = i18n.t('눌러서 전체 보기');
-  row.innerHTML = `<span class="chat-think-body">${escapeHtml(text.slice(0, CHAT.THINKING_CHARS))}${text.length > CHAT.THINKING_CHARS ? "…" : ""}</span>`;
+  const label = dur && dur >= 1000 ? i18n.t("{t} 동안 생각함", { t: fmtDuration(dur) }) : i18n.t("생각함");
+  row.innerHTML = `<div class="conv-line conv-think-head"${text.trim() ? ' role="button" tabindex="0"' : ""}>`
+    + `<span class="conv-line-verb">${escapeHtml(label)}</span>${text.trim() ? '<span class="conv-line-caret">›</span>' : ""}</div>`
+    + (text.trim() ? `<div class="conv-think-body">${escapeHtml(text)}</div>` : "");
   return row;
 }
 
@@ -258,10 +260,86 @@ function resultBodyHtml(res, wrap) {
   );
 }
 
-/** 도구 호출 + (있으면) 결과. 끝난 도구는 한 줄로 접힌다(머리를 누르면 펼침). */
+// ── 에이전트가 일하는 흐름(Claude 앱 문법 — 앱 ConvActivity.tsx 와 같은 규칙·같은 문구) ──
+//  끝난 도구는 박스 없이 본문 흐름 속 한 줄: "실행됨 cd …›" / 이어진 것은 "명령어 2개 실행됨 ›".
+//  누르면 도구 시트(목록 → 상세: 명령어·출력 + 복사). 질문(AskUserQuestion)만 예전 박스를 쓴다.
+export function toolKind(m) {
+  const n = String((m && m.tool && m.tool.name) || "");
+  if (n === "Bash" || n === "shell" || n === "BashOutput" || n === "local_shell" || n === "local-command") return "bash";
+  if (n === "Read" || n === "NotebookRead") return "read";
+  if (n === "Edit" || n === "Write" || n === "MultiEdit" || n === "NotebookEdit" || n === "apply_patch") return "edit";
+  if (n === "Grep" || n === "Glob" || n === "Search" || n === "ToolSearch") return "search";
+  if (n === "WebFetch" || n === "WebSearch") return "web";
+  if (n === "Task" || n === "Agent") return "agent";
+  return "other";
+}
+/** 도구 한 줄의 대상(명령·경로) — 데몬 title("$ cmd" / "읽기 x.ts")에서 동사를 걷어 낸다. */
+export function toolTarget(m) {
+  const t = String((m && m.tool && (m.tool.title || m.tool.name)) || (m && m.text) || "").trim();
+  if (t.startsWith("$ ")) return t.slice(2);
+  const path = m && m.tool && m.tool.path;
+  if (path) return path;
+  return t.replace(/^(읽기|수정|쓰기|검색|편집)\s+/, "");
+}
+export const VERB_DONE = { bash: "실행됨", read: "읽음", edit: "수정함", search: "검색함", web: "확인함", agent: "맡김", other: "사용함" };
+export const VERB_RUN = { bash: "실행 중", read: "읽는 중", edit: "수정 중", search: "검색 중", web: "확인 중", agent: "맡기는 중", other: "사용 중" };
+/** 묶음 요약 — 같은 종류면 그 말로("명령어 2개 실행됨"), 섞이면 "도구 5개 사용함". */
+export function groupLabel(tools) {
+  const kinds = new Set(tools.map((r) => toolKind(r.msg)));
+  const n = tools.length;
+  if (kinds.size === 1) {
+    switch ([...kinds][0]) {
+      case "bash": return i18n.t("명령어 {n}개 실행됨", { n });
+      case "read": return i18n.t("파일 {n}개 읽음", { n });
+      case "edit": return i18n.t("파일 {n}개 수정함", { n });
+      case "search": return i18n.t("{n}번 검색함", { n });
+      case "web": return i18n.t("웹 {n}번 확인함", { n });
+      case "agent": return i18n.t("에이전트 {n}개에 맡김", { n });
+      default: break;
+    }
+  }
+  return i18n.t("도구 {n}개 사용함", { n });
+}
+/** 작업 중 표식 — 네 갈래 별(무채색, CSS 로 돌며 숨 쉰다). */
+export function sparkHtml(size) {
+  const z = size || 12;
+  return `<span class="conv-spark" style="width:${z}px;height:${z}px"><svg viewBox="0 0 24 24" width="${z}" height="${z}">`
+    + `<path d="M12 1.5 C12.9 7.6 16.4 11.1 22.5 12 C16.4 12.9 12.9 16.4 12 22.5 C11.1 16.4 7.6 12.9 1.5 12 C7.6 11.1 11.1 7.6 12 1.5 Z" fill="currentColor"/></svg></span>`;
+}
+const resOf = (r) => (r && r.result && r.result.result) || null;
+
+/** 도구 호출 + (있으면) 결과. 질문이 아니면 한 줄(누르면 도구 시트). */
 export function buildToolRow(r, open) {
+  if (!r.question) return buildActivityLine(r);
+  return buildToolBox(r, open);
+}
+
+export function buildActivityLine(r) {
   const m = r.msg;
-  const res = r.result && r.result.result ? r.result.result : null;
+  const res = resOf(r);
+  const kind = toolKind(m);
+  const running = !res;
+  const failed = !!res && res.ok === false;
+  const target = toolTarget(m);
+  const verb = i18n.t(running ? VERB_RUN[kind] : VERB_DONE[kind]);
+  const row = document.createElement("div");
+  row.className = "conv-line" + (failed ? " failed" : "") + (running ? " running" : "") + (r.sub ? " conv-sub" : "");
+  row.dataset.key = r.key;
+  row.dataset.act = "tools";
+  row.setAttribute("role", "button");
+  row.tabIndex = 0;
+  row.title = `${verb} ${target}`;
+  row.innerHTML = (running ? sparkHtml(11) : failed ? `<span class="conv-line-x">✕</span>` : "")
+    + `<span class="conv-line-verb">${escapeHtml(verb)}</span>`
+    + `<span class="conv-line-target${kind === "bash" ? " mono" : ""}">${escapeHtml(target)}</span>`
+    + `<span class="conv-line-caret">›</span>`;
+  row._tools = [r];
+  return row;
+}
+
+function buildToolBox(r, open) {
+  const m = r.msg;
+  const res = resOf(r);
   const row = document.createElement("div");
   row.className = "chat-tool" + (r.sub ? " conv-sub" : "");
   row.dataset.key = r.key;
@@ -302,6 +380,52 @@ export function buildToolRow(r, open) {
   return row;
 }
 
+// ── 도구 시트(목록 → 상세) — 앱 ToolSheet 와 같은 구성. 패널 안 오버레이, 뷰가 열고 닫는다. ──
+function toolInputText(m) {
+  if (toolKind(m) === "bash") return toolTarget(m);
+  const parts = [m.tool && m.tool.path, m.tool && m.tool.argsPreview].filter(Boolean);
+  return parts.length ? parts.join("\n") : toolTarget(m);
+}
+function sheetSection(title, text, inner) {
+  return `<div class="conv-sheet-sec"><div class="conv-sheet-sec-head"><span>${escapeHtml(title)}</span>`
+    + (text ? `<button class="conv-act" type="button" data-sheet="copy" data-text="${escapeHtml(text)}" title="${i18n.t("복사")}">${icons.copy({ size: 13 })}</button>` : "")
+    + `</div>${inner}</div>`;
+}
+/** 시트 내용을 그린다. sel=null 이면 목록. */
+export function paintToolSheet(el, tools, sel) {
+  const single = tools.length === 1;
+  const cur = sel != null ? tools[sel] : null;
+  const stateText = (r) => !resOf(r) ? i18n.t("실행 중") : resOf(r).ok === false ? i18n.t("실패") : i18n.t("완료");
+  let head = `<div class="conv-sheet-head">`
+    + (cur && !single ? `<button class="conv-sheet-btn" type="button" data-sheet="back" title="${i18n.t("뒤로")}">‹</button>` : `<span class="conv-sheet-btn"></span>`)
+    + `<div class="conv-sheet-title"><div>${escapeHtml(cur ? String((cur.msg.tool && cur.msg.tool.name) || i18n.t("도구")) : groupLabel(tools))}</div>`
+    + (cur ? `<div class="conv-sheet-sub">${escapeHtml(stateText(cur))}</div>` : "") + `</div>`
+    + `<button class="conv-sheet-btn" type="button" data-sheet="close" title="${i18n.t("닫기")}">✕</button></div>`;
+  let body;
+  if (cur) {
+    const m = cur.msg;
+    const res = resOf(cur);
+    const input = toolInputText(m);
+    const path = m.tool && m.tool.path;
+    body = sheetSection(toolKind(m) === "bash" ? i18n.t("명령어") : i18n.t("입력"), input, `<pre class="conv-sheet-code">${escapeHtml(input)}</pre>`);
+    if (res && res.patch) body += sheetSection(i18n.t("변경"), "", patchHtml(res.patch));
+    const out = String((res && res.preview) || "").replace(/\n+$/, "");
+    if (out) body += sheetSection(i18n.t("출력"), out, `<pre class="conv-sheet-code">${escapeHtml(out)}</pre>`);
+    else if (!(res && res.patch)) body += `<div class="conv-sheet-note">${escapeHtml(res ? i18n.t("출력 없음") : i18n.t("아직 실행 중이에요"))}</div>`;
+    if (res && res.truncated) body += `<div class="conv-sheet-note">${i18n.t("출력이 길어 앞부분만 보여요")}</div>`;
+    if (path) body += `<button class="btn small ghost conv-sheet-open" type="button" data-sheet="open" data-path="${escapeHtml(path)}">${i18n.t("IDE 로 열기")}</button>`;
+  } else {
+    body = `<div class="conv-sheet-list">` + tools.map((r, i) => {
+      const k = toolKind(r.msg);
+      const failed = !!resOf(r) && resOf(r).ok === false;
+      return `<button class="conv-sheet-item${failed ? " failed" : ""}" type="button" data-sheet="pick" data-i="${i}">`
+        + `<span class="conv-line-verb">${escapeHtml(i18n.t(resOf(r) ? VERB_DONE[k] : VERB_RUN[k]))}</span>`
+        + `<span class="conv-line-target${k === "bash" ? " mono" : ""}">${escapeHtml(toolTarget(r.msg))}</span><span class="conv-line-caret">›</span></button>`;
+    }).join("") + `</div>`;
+  }
+  el.innerHTML = `<div class="conv-sheet-card" role="dialog">${head}<div class="conv-sheet-body">${body}</div></div>`;
+}
+
 /** 짝 없는 결과(도구 호출이 받아 둔 내역 밖에 있다). */
 export function buildOrphanRow(r) {
   const m = r.msg;
@@ -319,13 +443,17 @@ export function buildOrphanRow(r) {
 }
 
 export function buildGroupRow(r) {
+  const tools = r.items.filter((x) => x.type === "tool");
+  const label = groupLabel(tools) + (r.bad ? i18n.t(" · 실패 {n}", { n: r.bad }) : "");
   const row = document.createElement("div");
-  row.className = "chat-tool-group";
+  row.className = "conv-line conv-line-group" + (r.bad ? " failed" : "");
   row.dataset.key = r.key;
-  row.innerHTML = `<span class="chat-tool-mark ${r.bad ? "err" : "ok"}">${r.bad ? "✕" : "✓"}</span>`
-    + `<span class="chat-tool-group-label">${escapeHtml(i18n.t("도구 {n}개 실행 · {names}", { n: r.count, names: toolRunLabel(r.names) }))}`
-    + `${r.bad ? escapeHtml(i18n.t(" · 실패 {n}", { n: r.bad })) : ""}</span>`
-    + `<span class="chat-tool-group-caret">›</span>`;
+  row.dataset.act = "tools";
+  row.setAttribute("role", "button");
+  row.tabIndex = 0;
+  row.innerHTML = (r.bad ? `<span class="conv-line-x">✕</span>` : "")
+    + `<span class="conv-line-verb">${escapeHtml(label)}</span><span class="conv-line-caret">›</span>`;
+  row._tools = tools;
   return row;
 }
 
@@ -357,12 +485,18 @@ export function buildDividerRow(m) {
   return row;
 }
 
-/** 턴 끝 요약 — 메시지가 아니라 기록이다(말풍선·색 없음). */
+/** 턴 끝 줄 — [복사] [읽어 주기] · 걸린 시간(앱 TurnActions 와 같다). 말풍선·색 없음. */
 export function buildTurnRow(r) {
   const row = document.createElement("div");
   row.className = "conv-turn";
   row.dataset.key = r.key;
-  row.textContent = turnSummaryText(r);
+  const text = String(r.text || "");
+  const sum = turnSummaryText(r);
+  row.innerHTML = (text
+    ? `<button class="conv-act" type="button" data-act="copy" title="${i18n.t("복사")}">${icons.copy({ size: 14 })}</button>`
+      + (ttsAvailable() ? `<button class="conv-act" type="button" data-act="speak" title="${i18n.t("읽어 주기")}">${icons.speaker({ size: 14 })}</button>` : "")
+    : "") + (sum ? `<span class="conv-turn-sum">${escapeHtml(sum)}</span>` : "");
+  row._copyText = text;
   return row;
 }
 

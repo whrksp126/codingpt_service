@@ -36,5 +36,27 @@
     if (h === 'usage') v._toggleUsagePop();
     if (h === 'plus') v.composer._togglePlusMenu();
     if (h === 'more') v._toggleMoreMenu();
+    if (h.startsWith('rows')) {   // 흐름(도구 한 줄·묶음·생각·턴 끝 줄·작업 중) — #rows / #rows-sheet / #rows-detail
+      const T = Date.now() - 60000; let q = 0;
+      const ev = (o) => ({ seq: ++q, ts: T + q * 1500, ...o });
+      const tool = (id, name, title, path) => ev({ op: 'msg', msg: { key: 'tu:' + id, role: 'assistant', kind: 'tool_use', tool: { id, name, title, path } } });
+      const res = (id, ok, preview, extra) => ev({ op: 'msg', msg: { key: 'r:' + id, role: 'user', kind: 'tool_result', result: { toolUseId: id, ok, preview, ...(extra || {}) } } });
+      const evs = [ev({ op: 'turn', phase: 'start', turn: 1 }),
+        ev({ op: 'msg', msg: { key: 'u:1', role: 'user', kind: 'text', text: '빌드 깨진 거 고쳐줘', status: 'sent' } }),
+        ev({ op: 'msg', msg: { key: 'th:1', role: 'assistant', kind: 'thinking', text: '' } }),
+        tool('a', 'Bash', '$ cd codingpt_pc && npm test 2>&1 | tail -20', ''), res('a', true, 'parsed 91/91\nALL PASS'),
+        tool('b', 'Bash', '$ git status --short', ''), res('b', true, ' M src/js/conv-rows.js'),
+        tool('c', 'Read', '읽기 src/js/conv-view.js', 'src/js/conv-view.js'), res('c', true, '1\timport x'),
+        ev({ op: 'msg', msg: { key: 'm:0', role: 'assistant', kind: 'text', text: '원인은 **conv-rows.js** 의 import 누락이었어요. 고쳤고 테스트가 전부 통과해요.' } }),
+        ev({ op: 'turn', phase: 'end', turn: 1, durationMs: 42000 }),
+        ev({ op: 'turn', phase: 'start', turn: 2 }),
+        ev({ op: 'msg', msg: { key: 'u:2', role: 'user', kind: 'text', text: '배포도 해줘', status: 'sent' } }),
+        tool('d', 'Edit', '수정 deploy.sh', 'deploy.sh'), res('d', false, 'old_string not found'),
+        tool('e', 'Bash', '$ ./deploy.sh prod', '')];
+      v.m.thread.state = 'working';
+      v._stopTick = () => {};
+      (async () => { const M = await import('./js/conv-model.js'); M.applyOpen(v.m, { thread: v.m.thread, headSeq: q, events: evs }); v._render(); v._syncWorking?.();
+        if (h !== 'rows') setTimeout(() => { v.rowsEl.querySelector('.conv-line-group')?.click(); if (h === 'rows-detail') setTimeout(() => v._sheetEl?.querySelector('[data-sheet=pick]')?.click(), 60); }, 80); })();
+    }
   }, 100);
 </script></body></html>

@@ -3276,7 +3276,9 @@ button.au-chip, .au-chip { border: none; font-family: inherit; flex: none; }
 .conv-act.done { color: var(--text2); }
 
 /* 턴 끝 요약 · 안내 */
-.conv-turn { align-self: flex-start; font-size: 11px; color: var(--dim); }
+.conv-turn { align-self: flex-start; display: flex; align-items: center; gap: 2px; margin-left: -4px; font-size: 11px; color: var(--dim); }
+.conv-turn-sum { margin-left: 6px; }
+.conv-turn .conv-act.on { color: var(--text); }
 .conv-turn:empty { display: none; }
 .conv-notice { font-size: 12px; line-height: 17px; color: var(--text3); }
 .conv-notice.warn { color: var(--warn); }
@@ -3593,7 +3595,7 @@ body.is-card-dragging, body.is-card-dragging * { cursor: grabbing !important; }
 .ch-ev-acts { display: flex; gap: 6px; margin-top: 10px; }
 .ch-ev-acts .btn, .ch-agent .btn, .ch-req-acts .btn { display: inline-flex; align-items: center; gap: 5px; }
 .ch-user { align-self: flex-end; max-width: 78%; display: flex; flex-direction: column; align-items: flex-end; animation: chIn var(--dur-2) var(--ease-enter); }
-.ch-bubble { background: var(--elevated2); color: var(--text); border-radius: 14px 14px 4px 14px; padding: 8px 12px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; user-select: text; -webkit-user-select: text; }
+.ch-bubble { background: var(--elevated2); color: var(--text); border-radius: 14px 14px 4px 14px; padding: 8px 12px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; -webkit-user-select: text; user-select: text; -webkit-user-select: text; }
 .ch-meta { margin-top: 3px; font-size: 11px; color: var(--text-dim); }
 .ch-agent { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; animation: chIn var(--dur-2) var(--ease-enter); }
 .ch-agent-h { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text2); }
@@ -3669,3 +3671,86 @@ body.is-card-dragging, body.is-card-dragging * { cursor: grabbing !important; }
 .conv-report-body { display: none; margin-top: 6px; }
 .conv-report.open .conv-report-preview { display: none; }
 .conv-report.open .conv-report-body { display: block; }
+
+/* ── 에이전트가 일하는 흐름(2026-11-27, 앱 ConvActivity 와 같은 문법) ──
+   끝난 도구 = 박스 없는 한 줄 "실행됨 cmd ›" / 묶음 "명령어 2개 실행됨 ›" → 누르면 도구 시트.
+   포인트 컬러 없음 — 실패만 error 색. */
+.conv-line {
+  align-self: flex-start; display: flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0;
+  padding: 2px 6px; margin-left: -6px; border-radius: var(--r-xs); font-size: 12px; line-height: 18px; cursor: default;
+}
+.conv-line[role=button]:hover { background: var(--hover); }
+.conv-line[role=button]:active { background: var(--pressed); }
+.conv-line-verb { flex: none; color: var(--text3); white-space: nowrap; }
+.conv-line-group .conv-line-verb { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; }
+.conv-line-target { flex: 0 1 auto; min-width: 0; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conv-line-target.mono { font-family: var(--mono-font); font-size: 11.5px; }
+.conv-line-caret { flex: none; color: var(--dim); }
+.conv-line.failed .conv-line-verb, .conv-line-x { color: var(--error); }
+.conv-line-x { flex: none; font-size: 10px; }
+.conv-line.running .conv-line-caret { display: none; }
+.conv-think { align-self: stretch; display: flex; flex-direction: column; }
+.conv-think-head .conv-line-verb { color: var(--dim); }
+.conv-think .conv-line-caret { transition: transform .15s ease; }
+.conv-think.open .conv-line-caret { transform: rotate(90deg); }
+.conv-think-body {
+  display: none; margin: 2px 0 2px 1px; padding-left: 10px; border-left: 1px solid var(--border);
+  color: var(--text3); font-size: 12px; line-height: 18px; white-space: pre-wrap; -webkit-user-select: text; user-select: text;
+}
+.conv-think.open .conv-think-body { display: block; animation: conv-fade .15s ease; }
+
+/* 작업 중 표식 — 네 갈래 별이 천천히 돌며 숨 쉰다. 글자는 은은하게 숨 쉰다. */
+.conv-spark { flex: none; display: inline-flex; color: var(--text2); animation: conv-spark-rot 2.4s linear infinite; }
+.conv-spark svg { animation: conv-spark-breath 1.2s ease-in-out infinite; }
+.chat-working .conv-working-title { animation: conv-breath 1.8s ease-in-out infinite; }
+@keyframes conv-spark-rot { to { transform: rotate(360deg); } }
+@keyframes conv-spark-breath { 0%, 100% { transform: scale(1); } 50% { transform: scale(.72); } }
+@keyframes conv-breath { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+@keyframes conv-fade { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .conv-spark, .conv-spark svg, .chat-working .conv-working-title { animation: none; } }
+
+/* 도구 시트 — 채팅 패널 안 오버레이(아래에서 올라오는 카드). */
+.conv-sheet {
+  position: absolute; inset: 0; z-index: 30; display: flex; align-items: flex-end; justify-content: center;
+  background: rgba(0, 0, 0, 0); transition: background .16s ease; outline: none;
+}
+.conv-sheet.in { background: rgba(0, 0, 0, .28); }
+.conv-sheet-card {
+  width: min(680px, calc(100% - 24px)); max-height: 78%; display: flex; flex-direction: column;
+  margin-bottom: 12px; background: var(--elevated, var(--bg2)); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .25); transform: translateY(16px); opacity: 0; transition: transform .18s ease, opacity .18s ease;
+}
+.conv-sheet.in .conv-sheet-card { transform: none; opacity: 1; }
+.conv-sheet-head { display: flex; align-items: center; gap: 8px; padding: 10px 10px 8px; border-bottom: 1px solid var(--border); }
+.conv-sheet-title { flex: 1; min-width: 0; text-align: center; font-size: 13px; font-weight: 600; color: var(--text); }
+.conv-sheet-title > div:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conv-sheet-sub { font-size: 11px; font-weight: 400; color: var(--dim); margin-top: 1px; }
+.conv-sheet-btn {
+  flex: none; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: var(--r-xs); background: transparent; color: var(--text3); font-size: 15px; padding: 0;
+}
+button.conv-sheet-btn:hover { background: var(--hover); color: var(--text); }
+.conv-sheet-body { overflow: auto; padding: 12px 14px 14px; animation: conv-fade .14s ease; }
+.conv-sheet-list { display: flex; flex-direction: column; margin: -6px -8px; }
+.conv-sheet-item {
+  display: flex; align-items: center; gap: 10px; min-height: 34px; padding: 0 10px; border: none; border-radius: var(--r-sm, 6px);
+  background: transparent; font-size: 12px; text-align: left; min-width: 0;
+}
+.conv-sheet-item:hover { background: var(--hover); }
+.conv-sheet-item .conv-line-verb { width: 52px; }
+.conv-sheet-item .conv-line-target { flex: 1; }
+.conv-sheet-item.failed .conv-line-verb { color: var(--error); }
+.conv-sheet-sec { margin-bottom: 12px; }
+.conv-sheet-sec-head { display: flex; align-items: center; margin-bottom: 5px; font-size: 11.5px; font-weight: 500; color: var(--text3); }
+.conv-sheet-sec-head > span { flex: 1; }
+.conv-sheet-code {
+  margin: 0; padding: 10px 12px; max-height: 340px; overflow: auto; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg); color: var(--text2); font-family: var(--mono-font); font-size: 11.5px; line-height: 17px;
+  white-space: pre; -webkit-user-select: text; user-select: text;
+}
+.conv-sheet-note { font-size: 12px; color: var(--dim); margin-bottom: 8px; }
+.conv-sheet-open { margin-top: 2px; }
+/* 이어진 작업 줄은 한 덩어리로 — 줄 사이 간격을 좁힌다(앱과 같은 밀도). 답 바로 아래 턴 끝 줄도 붙인다. */
+.conv-rows > :is(.conv-line, .conv-think) + :is(.conv-line, .conv-think) { margin-top: -10px; }
+.conv-rows > .conv-assistant + .conv-turn { margin-top: -8px; }
+.chat-working .conv-working-time { margin-right: -5px; }

@@ -27,11 +27,12 @@ import {
 } from "./conv-model.js";
 import {
   buildUserRow, buildAssistantRow, paintStream, buildThinkingLive, paintThinkingLive, buildThinkingRow,
-  buildToolRow, buildOrphanRow, buildGroupRow, buildDividerRow, buildReportRow, buildTurnRow, buildNoticeRow,
+  buildToolRow, buildOrphanRow, buildGroupRow, paintToolSheet, sparkHtml, buildDividerRow, buildReportRow, buildTurnRow, buildNoticeRow,
   hydrateMedia, loadMedia, showLightbox, mimeOf, isImagePath,
 } from "./conv-rows.js";
 import { ConvComposer, anchorMenu } from "./conv-composer.js";
 import { basename, isAbs } from "./path-utils.js";
+import { toggleSpeak, onSpeaking } from "./tts.js";
 import * as i18n from './i18n/index.js';
 
 // 이 PC 의 홈 절대경로(대화 속 절대경로 → IDE 의 홈-상대 경로 변환용). 한 번만 묻는다.
@@ -274,6 +275,19 @@ export class ConvView {
     // 본문을 누른 뒤의 Esc(중단)가 이 뷰에 닿게 한다 — 스크롤 영역은 원래 포커스를 못 받아서 키가 body 로 간다.
     this.scrollEl.tabIndex = -1;
     this.rowsEl.addEventListener("click", (e) => this._onBodyClick(e));
+    this.rowsEl.addEventListener("keydown", (e) => {
+      if ((e.key === "Enter" || e.key === " ") && e.target.matches?.("[role=button]")) { e.preventDefault(); e.target.click(); }
+    });
+    // 읽어 주기 — 지금 읽는 턴의 버튼만 '멈춤' 모양.
+    this._offSpeak = onSpeaking((id) => {
+      for (const b of this.rowsEl.querySelectorAll('[data-act="speak"]')) {
+        const on = b.closest("[data-key]")?.dataset.key === id;
+        if (b.classList.contains("on") === on) continue;
+        b.classList.toggle("on", on);
+        b.innerHTML = on ? icons.stop({ size: 12 }) : icons.speaker({ size: 14 });
+        b.title = on ? i18n.t("읽기 멈춤") : i18n.t("읽어 주기");
+      }
+    });
     this.connEl.addEventListener("click", (e) => {
       if (e.target.closest?.("[data-act='adopt']")) void this._adoptCurrent();
     });
@@ -282,7 +296,7 @@ export class ConvView {
     el.addEventListener("keydown", (e) => {
       if (e.key !== "Escape" || e.defaultPrevented || e.isComposing) return;
       if (e.target.closest?.(".conv-title-input, .approval-card, .conv-pop, .chat-pick, .conv-find")) return;
-      if (this._closePopovers()) { e.preventDefault(); return; }
+      if (this._closeToolSheet() || this._closePopovers()) { e.preventDefault(); return; }
       if (isBusy(this.m)) { e.preventDefault(); void this._interrupt(); }
     });
     this._onWinFocus = () => { if (this._visible) this.resync(); };
@@ -793,7 +807,7 @@ export class ConvView {
         this._paintStreamRow(el, r);
         return el;
       }
-      case "thinking": return buildThinkingRow(r.msg);
+      case "thinking": return buildThinkingRow(r.msg, r.dur);
       case "report": return buildReportRow(r.msg);
       case "tool": return buildToolRow(r, this._openTools.has(r.key));
       case "orphan": return buildOrphanRow(r);
@@ -838,14 +852,16 @@ export class ConvView {
     if (!el) {
       el = document.createElement("div");
       el.className = "chat-working";
-      el.innerHTML = `<span class="chat-working-dot"></span><span class="conv-working-title"></span><span class="conv-working-time"></span>`;
+      el.innerHTML = `${sparkHtml(13)}<span class="conv-working-time"></span><span class="conv-working-title"></span>`;
     }
     if (el !== this.rowsEl.lastElementChild) this.rowsEl.appendChild(el);   // 항상 맨 아래
-    const title = w.title || i18n.t('작업 중…');
-    const tEl = el.querySelector(".conv-working-title");
-    if (tEl.textContent !== title) tEl.textContent = title;
+    //  앱과 같은 문법: "42초 · 생각 중…" → 오래 걸리면 "아직 생각 중…". 도구가 돌면 "작업 중…" —
+    //  무슨 도구인지는 목록의 "실행 중" 줄이 이미 말한다(겹치지 않게 진행만).
     const ms = w.since != null ? Date.now() - w.since : -1;
-    const time = ms >= 1000 ? fmtDuration(ms) : "";
+    const label = w.title ? i18n.t('작업 중…') : ms >= 15000 ? i18n.t('아직 생각 중…') : i18n.t('생각 중…');
+    const tEl = el.querySelector(".conv-working-title");
+    if (tEl.textContent !== label) tEl.textContent = label;
+    const time = ms >= 1000 ? fmtDuration(ms) + " · " : "";
     const cEl = el.querySelector(".conv-working-time");
     if (cEl.textContent !== time) cEl.textContent = time;
   }
@@ -904,6 +920,8 @@ export class ConvView {
       const key = row ? row.dataset.key : "";
       const a = act.dataset.act;
       if (a === "copy") { this._copy(row, act); return; }
+      if (a === "tools") { this._openToolSheet(act._tools || [], null); return; }
+      if (a === "speak") { toggleSpeak(key, row._copyText || ""); return; }
       if (a === "retry" || a === "discard") {
         const cid = row.dataset.clientId || "";
         const ent = this.m.msgs.get(key);
@@ -957,6 +975,8 @@ export class ConvView {
       }
       return;
     }
+    const thk = t.closest?.(".conv-think-head");
+    if (thk && thk.parentElement?.classList.contains("has")) { thk.parentElement.classList.toggle("open"); return; }
     const rep = t.closest?.(".conv-report-head");
     if (rep) { rep.parentElement?.classList.toggle("open"); return; }
     const think = t.closest?.(".chat-thinking");
@@ -1816,8 +1836,54 @@ export class ConvView {
     if (this.jumpEl) this.jumpEl.classList.toggle("hidden", this._follow || this._atBottom());
   }
 
+  // ── 도구 시트(목록 → 상세) — 패널 안 오버레이. 앱 ToolSheet 와 같은 흐름 ──
+  _openToolSheet(tools, idx) {
+    if (!tools.length || !this.el) return;
+    this._closeToolSheet();
+    const el = document.createElement("div");
+    el.className = "conv-sheet";
+    let sel = tools.length === 1 ? 0 : idx;
+    const paint = () => paintToolSheet(el, tools, sel);
+    el.addEventListener("click", (e) => {
+      if (e.target === el) { this._closeToolSheet(); return; }
+      const b = e.target.closest?.("[data-sheet]");
+      if (!b) {
+        const dm = e.target.closest?.(".chat-diff-more");
+        if (dm) { dm.parentElement?.querySelector(".chat-diff-rest")?.classList.remove("hidden"); dm.remove(); }
+        return;
+      }
+      const a = b.dataset.sheet;
+      if (a === "close") this._closeToolSheet();
+      else if (a === "back") { sel = null; paint(); }
+      else if (a === "pick") { sel = Number(b.dataset.i) || 0; paint(); }
+      else if (a === "copy") this._flashCopied(b, b.dataset.text || "");
+      else if (a === "open") { if (b.dataset.path) this.ctx.openFile?.(b.dataset.path); this._closeToolSheet(); }
+    });
+    el.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault(); e.stopPropagation();
+      if (sel != null && tools.length > 1) { sel = null; paint(); } else this._closeToolSheet();
+    });
+    paint();
+    el.tabIndex = -1;
+    this.el.appendChild(el);
+    this._sheetEl = el;
+    requestAnimationFrame(() => { el.classList.add("in"); el.focus({ preventScroll: true }); });
+  }
+
+  _closeToolSheet() {
+    const el = this._sheetEl;
+    if (!el) return false;
+    this._sheetEl = null;
+    el.remove();
+    this.scrollEl?.focus({ preventScroll: true });
+    return true;
+  }
+
   dispose() {
     this._disposed = true;
+    this._closeToolSheet();
+    this._offSpeak?.();
     this._stopTick();
     clearTimeout(this._bannerTimer);
     clearTimeout(this._behindTimer);
