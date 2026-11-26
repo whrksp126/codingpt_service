@@ -6,6 +6,7 @@ import * as i18n from './i18n/index.js';
 import { isTaskWorkspace } from "./tasks-model.js";
 import { coordinatorTidOf } from "./orch-model.js";
 import { noteSlow, jobMark } from "./stall-monitor.js";
+import { staleDecision, WS_OFFLINE_RETRY_MS } from "./ws-offline.js";
 // Agent Tasks(§4) — 작업 run 의 worktree 워크스페이스 술어. 정본은 순수 모듈(tasks-model.js, 앱과 교차 테스트)이고
 //  여기서는 재노출만 한다(뷰 모듈이 state.js 하나만 보고 쓸 수 있게).
 export { isTaskWorkspace };
@@ -1047,13 +1048,32 @@ let _activeWasTask = false;
 let _taskWsRemovedHook = null;
 /** 보고 있던 작업 워크스페이스가 정리로 사라졌을 때(main.js 가 토스트를 띄운다). */
 export function onTaskWsRemoved(fn) { _taskWsRemovedHook = typeof fn === "function" ? fn : null; }
+// 느림≠끊김 — 오프라인 표시 전 유예·빠른 재확인(ws-offline.js 규칙).
+let _wsMisses = 0;
+let _wsEverOnline = false; // 이번 실행에서 서버 응답을 한 번이라도 받았나(부팅 직후 캐시는 바로 보여준다)
+let _wsRetryTimer = null;
+function scheduleWsRetry(ms) {
+  if (_wsRetryTimer) clearTimeout(_wsRetryTimer);
+  _wsRetryTimer = setTimeout(() => { _wsRetryTimer = null; void loadWorkspaces(); }, ms);
+}
 export async function loadWorkspaces() {
   { const cur = state.workspaces.find((w) => w.id === state.activeWsId); _activeWasTask = !!cur && isTaskWorkspace(cur); }
   try {
     const data = await api.fetchWorkspaces();
     const list = Array.isArray(data) ? data : data?.workspaces || data?.data || [];
-    // stale = Rust 가 last-known 캐시로 응답(서버 미가용). 목록은 "마지막으로 본 것" 그대로다.
+    // stale = Rust 가 last-known 캐시로 응답(서버 미가용/지연). 목록은 "마지막으로 본 것" 그대로다.
     const stale = !Array.isArray(data) && !!data?.stale;
+    if (stale) {
+      _wsMisses++;
+      const wasOnline = !state.wsStale && !state.wsError && _wsEverOnline;
+      const d = staleDecision({ wasOnline, misses: _wsMisses });
+      scheduleWsRetry(d.retryMs);
+      if (!d.showOffline) return; // 한 번 늦은 응답 — 지금 목록·온라인 표시 유지, 곧 재확인
+    } else {
+      _wsMisses = 0;
+      _wsEverOnline = true;
+      if (_wsRetryTimer) { clearTimeout(_wsRetryTimer); _wsRetryTimer = null; }
+    }
     state.workspaces = list;
     state.wsStale = stale ? { cachedAt: Number(data.cachedAt) || 0 } : null;
     state.wsError = null;
@@ -1093,6 +1113,7 @@ export async function loadWorkspaces() {
     }
   } catch (e) {
     state.wsError = String(e);
+    scheduleWsRetry(WS_OFFLINE_RETRY_MS); // 캐시도 없는 실패 — 60초 주기를 기다리지 않고 재확인
   }
   emit();
 }

@@ -128,7 +128,7 @@ pub fn fetch_workspaces() -> Result<serde_json::Value, String> {
     let url = format!("{}/api/daemon/workspaces", server.trim_end_matches('/'));
     let call = ureq::get(&url)
         .set("Authorization", &format!("Bearer {token}"))
-        .timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(15)) // 느린 응답≠오프라인 — JS 가 연속 실패만 오프라인으로 본다(ws-offline.js)
         .call();
     let err = match call {
         Ok(resp) => match resp.into_json::<serde_json::Value>() {

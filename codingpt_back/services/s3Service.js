@@ -13,23 +13,28 @@ const TEXT_EXTENSIONS = new Set([
 
 class S3Service {
   constructor() {
-    this.s3Client = this._buildClient();
-    // ── 서버-사이드 데이터 전송용 내부 클라이언트 ──
-    //  OBJECTSTORE_ENDPOINT 는 공개 호스트(objectstore.ghmate.com = Cloudflare)라, 데몬/앱에
-    //  넘길 presigned URL 은 이걸 써야 한다. 하지만 백엔드가 **자기 데이터를** GetObject/PutObject 로
-    //  실어 나를 때 이 공개 호스트로 나가면 Cloudflare 를 한 바퀴 돌아(edge→origin) 돌아온다 —
-    //  작은 오브젝트는 버티지만 70MB 급(PC 업데이터·스냅샷)은 CF 대용량 경로에서 스톨→500/524 로 죽는다
-    //  (2026-09-21 실측: 공개 경로 83B/s vs 내부 minio:9000 ≈1GB/s). OBJECTSTORE_INTERNAL_ENDPOINT
-    //  (예: http://minio:9000)가 있으면 데이터 전송은 그 내부 직결 클라이언트로 보낸다. 없으면 공개로 폴백.
-    this.s3InternalClient = process.env.OBJECTSTORE_INTERNAL_ENDPOINT
+    // ── 클라이언트 2종 ──
+    //  s3PublicClient = OBJECTSTORE_ENDPOINT(공개 호스트 objectstore.ghmate.com). 데몬/앱/폰에 넘길
+    //   presigned URL 은 **반드시** 이걸로 서명한다(URL 의 호스트가 그대로 클라이언트에게 간다).
+    //  s3Client = 백엔드가 자기 데이터를 직접 주고받는 모든 send() 용. OBJECTSTORE_INTERNAL_ENDPOINT
+    //   (예: http://minio:9000, nginx_proxy 도커 네트워크 직결)가 있으면 그쪽, 없으면 공개로 폴백.
+    //  왜: 공개 호스트로 나가면 DNS/Cloudflare 상태에 백엔드 지연이 묶인다 —
+    //   2026-09-21 대용량(70MB) 공개 경로 83B/s vs 내부 ≈1GB/s, 그리고 2026-11-26 objectstore 를 직통 DNS 로
+    //   바꾼 뒤에도 keep-alive 소켓 16개가 옛 Cloudflare IP 에 붙은 채 남아 /api/daemon/workspaces 가
+    //   1.5~20초(PC 사이드바 10초 타임아웃 → "오프라인") 걸렸다. 내부 직결이면 둘 다 무관하다.
+    this.s3PublicClient = this._buildClient();
+    this.s3Client = process.env.OBJECTSTORE_INTERNAL_ENDPOINT
       ? this._buildClient(process.env.OBJECTSTORE_INTERNAL_ENDPOINT)
-      : this.s3Client;
+      : this.s3PublicClient;
     this.bucketName = process.env.OBJECTSTORE_BUCKET;
 
     if (!this.bucketName) {
       console.warn('[S3Service] OBJECTSTORE_BUCKET 환경 변수가 설정되지 않았습니다.');
     }
   }
+
+  // 하위호환 별칭(pcReleaseService) — 이제 s3Client 자체가 내부 직결이다. 재생성(skew 회복) 후에도 같은 걸 가리키게 getter.
+  get s3InternalClient() { return this.s3Client; }
 
   // S3Client 생성(재생성 가능). systemClockOffset 을 명시하지 않아 항상 0(=시스템 시계)으로 시작한다.
   //  → skew 자가회복(_sendWithRetry)에서 이 메서드로 새 클라이언트를 만들어 낡은 오프셋을 버린다.
@@ -151,7 +156,7 @@ class S3Service {
         //  한 번만 재생성(무한루프 방지). 재생성 후에도 나면 실제 호스트 시계가 크게 틀어진 것.
         if (this._isClockSkew(e) && !skewHealed) {
           skewHealed = true;
-          try { this.s3Client = this._buildClient(); } catch (_) { /* noop */ }
+          try { this.s3Client = this._buildClient(process.env.OBJECTSTORE_INTERNAL_ENDPOINT); } catch (_) { /* noop */ }
           console.warn('[S3Service] RequestTimeTooSkewed 감지 → S3 클라이언트 재생성 후 재시도');
           continue; // sleep 없이 즉시 재시도(새 클라이언트=오프셋 0)
         }
@@ -1395,7 +1400,7 @@ class S3Service {
       Key: key,
       ...(contentType ? { ContentType: contentType } : {}),
     });
-    return getSignedUrl(this.s3Client, command, { expiresIn });
+    return getSignedUrl(this.s3PublicClient, command, { expiresIn }); // 공개 호스트로 서명(클라이언트가 직접 접속)
   }
 
   /**
@@ -1408,7 +1413,7 @@ class S3Service {
     if (!this.validatePath(key)) throw new Error('잘못된 오브젝트 키입니다.');
     const { expiresIn = 900 } = options;
     const command = new GetObjectCommand({ Bucket: this.bucketName, Key: key });
-    return getSignedUrl(this.s3Client, command, { expiresIn });
+    return getSignedUrl(this.s3PublicClient, command, { expiresIn }); // 공개 호스트로 서명(클라이언트가 직접 접속)
   }
 
   // ── S3 멀티파트(대용량 업로드 — Cloudflare 프록시의 요청당 100MB 제한 우회) ──
@@ -1429,7 +1434,7 @@ class S3Service {
     const command = new UploadPartCommand({
       Bucket: this.bucketName, Key: key, UploadId: uploadId, PartNumber: partNumber,
     });
-    return getSignedUrl(this.s3Client, command, { expiresIn });
+    return getSignedUrl(this.s3PublicClient, command, { expiresIn }); // 공개 호스트로 서명(클라이언트가 직접 접속)
   }
 
   /** 멀티파트 완료 — parts: [{ PartNumber, ETag }] (PartNumber 오름차순). */
