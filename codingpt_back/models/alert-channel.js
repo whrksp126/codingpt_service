@@ -23,6 +23,13 @@ module.exports = (sequelize, DataTypes) => {
     last_message_at: { type: DataTypes.DATE, allowNull: true },
     last_preview: { type: DataTypes.STRING(200), allowNull: true },
     last_level: { type: DataTypes.STRING(12), allowNull: true },
+    // 봇(2026-11-27)
+    soul: { type: DataTypes.TEXT, allowNull: true },            // 성격·일하는 방식(SOUL)
+    memory: { type: DataTypes.TEXT, allowNull: true },          // 오래 기억할 것(MEMORY) — 줄 단위
+    template: { type: DataTypes.STRING(40), allowNull: true },
+    webhook_secret: { type: DataTypes.STRING(120), allowNull: true }, // 서명 검증(GitHub·Linear·Sentry·Vercel)
+    item_seq: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    first_run: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     archived_at: { type: DataTypes.DATE, allowNull: true },
     created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
     updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },

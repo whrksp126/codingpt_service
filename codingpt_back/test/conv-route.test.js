@@ -27,7 +27,7 @@ const { SERVER_CAPS, computeServerCaps } = require('../config/caps');
 // 설계 §4 의 메서드 표 + §8 의 타임아웃(복사본 — 서버 표가 바뀌면 여기서 깨져야 한다. 바꾸려면 설계 문서 먼저).
 const DESIGN_TABLE = [
   ['conv.caps', 15000], ['conv.list', 15000], ['conv.create', 30000], ['conv.open', 30000], ['conv.since', 15000],
-  ['conv.before', 15000], ['conv.send', 30000], ['conv.respond', 15000], ['conv.interrupt', 15000], ['conv.set', 15000],
+  ['conv.before', 15000], ['conv.send', 30000], ['conv.respond', 15000], ['conv.interrupt', 15000], ['conv.continue', 30000], ['conv.dismissCut', 15000], ['conv.set', 15000],
   ['conv.stop', 15000], ['conv.remove', 15000], ['conv.detail', 15000], ['conv.commands', 15000],
   ['conv.toTerminal', 30000], ['conv.adopt', 30000], ['conv.file', 30000],
 ];
@@ -113,7 +113,7 @@ async function withControl(fn, deviceId = 41) {
 test('허용 표 = 설계 §4 표 + §8 타임아웃(메서드 집합·순서·값 전부)', () => {
   assert.deepStrictEqual([...daemonController._CONV_RPC_OK.entries()], DESIGN_TABLE);
   const slow = DESIGN_TABLE.filter(([, ms]) => ms === 30000).map(([m]) => m).sort();
-  assert.deepStrictEqual(slow, ['conv.adopt', 'conv.create', 'conv.file', 'conv.open', 'conv.send', 'conv.toTerminal']);
+  assert.deepStrictEqual(slow, ['conv.adopt', 'conv.continue', 'conv.create', 'conv.file', 'conv.open', 'conv.send', 'conv.toTerminal']);
   assert.ok(DESIGN_TABLE.every(([, ms]) => ms === 15000 || ms === 30000));
 });
 

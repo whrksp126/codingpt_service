@@ -155,7 +155,8 @@ export class ConvView {
       <div class="chat-banner hidden"></div>
       <div class="chat-scroll conv-scroll"><div class="conv-rows"></div></div>
       <div class="chat-approvals conv-dock"></div>
-      <div class="conv-dock-more hidden"></div>`;
+      <div class="conv-dock-more hidden"></div>
+      <div class="conv-cut hidden"></div>`;
     this.host.appendChild(el);
     this.el = el;
     this.connEl = el.querySelector(".conv-conn");
@@ -164,6 +165,17 @@ export class ConvView {
     this.rowsEl = el.querySelector(".conv-rows");
     this.dockEl = el.querySelector(".conv-dock");
     this.dockMoreEl = el.querySelector(".conv-dock-more");
+    this.cutEl = el.querySelector(".conv-cut");
+    this.cutEl.addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-act]");
+      if (!b || !this.m.threadId) return;
+      const m = b.dataset.act === "go" ? "conv.continue" : "conv.dismissCut";
+      b.disabled = true;
+      this._rpc(m, { threadId: this.m.threadId })
+        .then((r) => { if (r && r.ok === false && r.code) this._setBanner(convErrorText(r.code), "warn", 4000); })
+        .catch((err) => { if (!isOfflineCode(err.code)) this._setBanner(i18n.t('이어 가지 못했어요 · 잠시 후 다시 시도해 주세요'), "warn", 4000); })
+        .finally(() => { b.disabled = false; void this._catchUp(); });
+    });
     // 도구줄(컴포저 아래) — Claude 앱과 같은 배치(2026-10-02): 왼쪽 [+] [더보기] [모드] · 오른쪽 [모델] [추론 강도] [사용량 링] [전송].
     //  헤더 줄(제목·모델·터미널·목록·새 대화)은 없앴다 — 그 기능은 [더보기] 메뉴로 갔다.
     const mkTool = (cls, html, title) => {
@@ -688,6 +700,7 @@ export class ConvView {
     this._syncBlank(rows.length === 0);
     this._syncWorking();
     this._renderDock();
+    this._syncCut();
     this._syncHead();
     this._syncConn();
     this._syncUsage();
@@ -867,6 +880,28 @@ export class ConvView {
   }
 
   // ── 요청 도크(§10.8) — 가장 오래된 것 하나 + "n개 더" ──
+  /** 끊긴 작업 띠(데몬 thread.cut) — 사용 한도/재시작으로 멈춘 턴. 작업 중이면 숨긴다. */
+  _syncCut() {
+    if (!this.cutEl) return;
+    const cut = this.m.thread && this.m.thread.cut;
+    const st = this.m.thread && this.m.thread.state;
+    const show = !!cut && st !== "working" && st !== "waiting";
+    this.cutEl.classList.toggle("hidden", !show);
+    if (!show) { this._cutSig = ""; return; }
+    const sig = JSON.stringify(cut);
+    if (sig === this._cutSig) return;
+    this._cutSig = sig;
+    const at = cut.resetsAt ? new Date(cut.resetsAt) : null;
+    const hm = at ? `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}` : "";
+    const auto = cut.auto !== false;
+    const text = cut.kind === "limit"
+      ? (at && auto ? i18n.t('사용 한도로 멈췄어요 · {t}에 자동으로 이어 가요', { t: hm }) : i18n.t('사용 한도로 멈췄어요'))
+      : (auto ? i18n.t('PC 쪽 재시작으로 끊겼어요 · 곧 자동으로 이어 가요') : i18n.t('PC 쪽 재시작으로 작업이 끊겼어요'));
+    this.cutEl.innerHTML = `<span class="conv-cut-dot"></span><span class="conv-cut-text">${escapeHtml(text)}</span>`
+      + `<button type="button" class="conv-cut-btn" data-act="no">${escapeHtml(i18n.t('이어가지 않기'))}</button>`
+      + `<button type="button" class="conv-cut-btn primary" data-act="go">${escapeHtml(i18n.t('지금 이어가기'))}</button>`;
+  }
+
   _renderDock() {
     if (!this.dockEl) return;
     const all = openReqs(this.m);

@@ -225,6 +225,8 @@ back 은 모든 프레임에 `hostDeviceId`(프레임이 온 PC)를 붙인다 �
 | `conv.send` | `{ threadId, clientId, text, attachments? }` | `{ ok, status:'sent'\|'queued'\|'failed', seq, code? }` |
 | `conv.respond` | `{ threadId, reqId, decision, always?, message?, answers?, by? }` | `{ ok }` |
 | `conv.interrupt` | `{ threadId }` | `{ ok, interrupted, code? }` |
+| `conv.continue` | `{ threadId }` | `{ ok, status?, code? }` — 끊긴 작업 이어가기(§4.9). cut 이 없으면 `{ ok:false, code:'NO_CUT' }` |
+| `conv.dismissCut` | `{ threadId }` | `{ ok }` — 이어가지 않기(cut 지움) |
 | `conv.set` | `{ threadId, mode?, model?, title? }` | `{ thread }` |
 | `conv.stop` | `{ threadId }` | `{ ok }` (프로세스만 내림. 대화는 남는다) |
 | `conv.remove` | `{ threadId }` | `{ ok }` (우리 로그·목록에서 제거. 에이전트의 세션 파일은 건드리지 않는다) |
@@ -522,3 +524,15 @@ push delta:  off 일치하면 이어 붙임, 아니면 conv.since
 - 이미지 base64 첨부, 파일 되감기(checkpoint), 포크.
 - 채팅 세션에서 `cpt` CLI 사용(프리뷰 열기 등).
 - E2EE 봉투로 conv_event 봉인.
+
+
+## §4.9 끊긴 작업 이어하기(2026-11-27, Orca native-chat recovery 대조 이식)
+
+`thread.cut = { kind:'limit'|'restart', turn, at, resetsAt?, chain, auto? }` — 화면은 이것이 있고 작업 중이 아니면 "이어가기" 띠를 그린다.
+
+- **limit**: 사용 한도로 실패한 턴(rate_limit_event rejected 또는 CLI 한도 문장). 해제 시각+60초가 지나면 sweep 이
+  자동으로 이어가기 문구를 보낸다(패스당 2건, 연속 5회 상한 `cutChain`). 해제 시각을 모르면 자동으로 보내지 않는다.
+- **restart**: 데몬 종료(daemon_shutdown — 업데이트·종료) 또는 충돌 뒤 미결 정리(heal)로 끊긴 턴. 30분 안이면 한 번 자동으로 이어 간다.
+  문구는 "마지막 동작이 끝났는지 먼저 확인하고 되풀이하지 말라"를 담는다.
+- 사람이 아무 메시지나 보내면 cut·cutChain 을 지운다. 자동 이어가기 메시지는 `msg.auto = 'limit'|'restart'` 표식.
+- 끄기: `CPT_CONV_AUTO_CONTINUE=0`(버튼은 그대로).

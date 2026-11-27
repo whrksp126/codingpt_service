@@ -16,6 +16,7 @@
  *   sub             서브에이전트 메시지(parent_tool_use_id) 포함
  *   big <n>         n 자짜리 텍스트
  *   fail            실패로 끝나는 턴(is_error)
+ *   limitfail <s>   사용 한도 차단(rejected, s 초 뒤 해제) 후 실패 결과
  *   die             턴 도중 비정상 종료(exit 3 + stderr)
  *   diereq          승인 요청을 낸 채 비정상 종료
  *   rate <status>   rate_limit_event(status, 5시간 창 utilization 0.91) 를 낸 뒤 평범한 응답
@@ -279,6 +280,13 @@ async function turn(u) {
       await sleep(80);
       process.stderr.write('fatal: crashed while waiting\n');
       process.exit(4);
+      return;
+    }
+    case 'limitfail': {
+      // 사용 한도 차단(rejected) → 실패 결과. arg = 해제까지 남은 초(기본 1).
+      const at = Math.floor(Date.now() / 1000) + (parseInt(arg || '1', 10));
+      out({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', resetsAt: at, rateLimitType: 'five_hour' }, uuid: uid(), session_id: sessionId });
+      result("You've hit your session limit · resets 3pm", { subtype: 'success', is_error: true, terminal_reason: 'api_error' });
       return;
     }
     case 'rate': {

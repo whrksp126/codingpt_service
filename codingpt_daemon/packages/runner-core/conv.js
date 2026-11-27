@@ -69,6 +69,24 @@ const ERROR_CODES = ['CONV_DISABLED', 'AGENT_UNAVAILABLE', 'AGENT_NOT_LOGGED_IN'
   'THREAD_BUSY_IN_TERMINAL', 'REQ_NOT_PENDING', 'TOO_MANY_LIVE', 'BAD_REQUEST', 'START_FAILED', 'ADOPT_FAILED',
   'CONTROL_TIMEOUT', 'CONTROL_FAILED'];
 
+// ── 끊긴 작업 이어하기(2026-11-27, Orca native-chat recovery 대조 이식) ─────────────────
+//  thread.cut = { kind:'limit'|'restart', turn, at, resetsAt?, chain } — 사람이 아무 말이나 보내면 지운다.
+//   · limit   : 사용 한도로 턴이 실패. 해제 시각(+여유)이 지나면 자동으로 "이어서" 를 보낸다(연속 5회 상한).
+//               해제 시각을 모르면 자동으로 보내지 않는다(버튼만).
+//   · restart : 데몬 재시작(업데이트·종료·충돌)으로 턴이 끊김. 30분 안이면 자동으로 한 번 이어 간다.
+//  이어가기 문구는 "마지막 동작이 끝났는지 먼저 확인하고 되풀이하지 말라" 를 담는다(Orca 와 같은 원칙).
+//  끄기: CPT_CONV_AUTO_CONTINUE=0 (버튼은 그대로 쓸 수 있다).
+const CONTINUE_LIMIT_TEXT = '사용 한도가 풀렸습니다. 끊긴 곳부터 이어서 진행하세요.';
+const CONTINUE_RESTART_TEXT = 'CodingPT 가 다시 시작돼 직전 작업이 중간에 끊겼습니다. 이어 가기 전에 마지막 동작이 끝났는지 먼저 확인하고, 끝났다면 되풀이하지 마세요. 원래 요청을 마칠 때까지(또는 정말 막힐 때까지) 계속하세요.';
+const CUT_CHAIN_MAX = 5;
+const CUT_RESET_GRACE_MS = 60 * 1000;
+const CUT_RESTART_AUTO_MS = 30 * 60 * 1000;
+const CUT_RESET_MAX_MS = 31 * 24 * 3600 * 1000;
+// CLI 가 한도 문장으로만 알릴 때(형식 실측: Orca claude-limit-line.ts) — rate_limit 오류/실패 결과 텍스트에만 적용한다.
+const LIMIT_TEXT_RE = /(^Claude AI usage limit reached\|(\d{9,11}))|(^You(?:'|’)ve hit your (?:[\w-]+ )*limit\b)|(all available accounts have exhausted)/im;
+function autoContinueOn() { return !/^(0|false|off|no)$/i.test(String(process.env.CPT_CONV_AUTO_CONTINUE || '')); }
+function toMs(v) { const n = Number(v); if (!Number.isFinite(n) || n <= 0) return null; return n < 1e12 ? n * 1000 : n; }
+
 const DEFAULT_TIMINGS = {
   idleMs: 10 * 60 * 1000,   // 이만큼 조용하면 프로세스를 내린다(대기 요청이 있으면 내리지 않는다)
   sweepMs: 30 * 1000,
@@ -335,6 +353,7 @@ function heal(id) {
   for (const ev of d.queued) evs.push({ op: 'msg', uuid: ev.uuid, msg: { ...ev.msg, status: 'failed' } });
   if (d.openTurn != null) evs.push({ op: 'turn', phase: 'end', turn: d.openTurn, ok: false, subtype: 'daemon_restart', interrupted: true });
   if (evs.length) store.appendMany(id, evs);
+  if (d.openTurn != null) setCut(id, { kind: 'restart', turn: d.openTurn });
 }
 
 // ── 프로세스 수명(§5) ────────────────────────────────────────────────────────
@@ -416,6 +435,7 @@ async function ensureProc(thread) {
 function beginTurn(proc) {
   if (proc.turnOpen) return;
   proc.turnOpen = true;
+  proc.limitHit = null;
   proc.turn += 1;
   store.patchThread(proc.id, { turn: proc.turn });
   record(proc.id, [{ op: 'turn', phase: 'start', turn: proc.turn }]);
@@ -569,7 +589,8 @@ function onEngine(proc, ev) {
       const rateLimit = { status: ev.status, kind: ev.kind || null, resetsAt: ev.resetsAt != null ? ev.resetsAt : null, utilization: ev.utilization != null ? ev.utilization : null, ...(ev.windows ? { windows: ev.windows } : (prev && prev.windows ? { windows: prev.windows } : {})) };
       const again = prev && prev.blocked && prev.kind === rateLimit.kind && prev.resetsAt === rateLimit.resetsAt;
       patch(id, { usage: usageOf(thread.usage, { rateLimit: { ...rateLimit, blocked: !!ev.blocked } }) });
-      if (ev.blocked && !again) notice(id, 'warn', 'RATE_LIMITED', '사용 한도에 도달했습니다. 한도가 풀린 뒤 다시 시도하세요');
+      if (ev.blocked) proc.limitHit = { resetsAt: toMs(rateLimit.resetsAt), kind: rateLimit.kind };
+      if (ev.blocked && !again) notice(id, 'warn', 'RATE_LIMITED', '사용 한도에 도달했습니다. 한도가 풀리면 자동으로 이어 갑니다');
       return;
     }
     case 'result': return onResult(proc, thread, ev);
@@ -677,6 +698,12 @@ function onResult(proc, thread, ev) {
       : { op: 'notice', level: 'error', code: 'TURN_FAILED', text: oneLine(approvals().redactValues(ev.text || ''), 300) || '작업이 실패로 끝났습니다' });
   }
   record(id, evs);
+  const limitText = failed && LIMIT_TEXT_RE.test(String(ev.text || ''));
+  if (failed && (proc.limitHit || limitText)) {
+    const m = /usage limit reached\|(\d{9,11})/i.exec(String(ev.text || ''));
+    const resetsAt = (proc.limitHit && proc.limitHit.resetsAt) || (m ? toMs(m[1]) : null);
+    setCut(id, { kind: 'limit', turn: proc.turn, resetsAt });
+  }
   const usage = (ev.contextTokens || ev.contextMax || ev.costUsd != null || ev.model) ? usageOf(thread.usage, ev) : undefined;
   const usageChanged = !!usage && JSON.stringify(usage) !== JSON.stringify(thread.usage || null);
   patch(id, { state: failed ? 'error' : 'idle', pending: 0, ...(usage ? { usage } : {}) }, { event: failed || usageChanged });
@@ -919,7 +946,7 @@ function sendInto(thread, args) {
   return p;
 }
 
-async function sendOnce(thread, { clientId, text, attachments }) {
+async function sendOnce(thread, { clientId, text, attachments, auto }) {
   const id = thread.id;
   const key = 'u:' + clientId;
   const prior = store.latestOf(id, 'msg', key);
@@ -932,7 +959,7 @@ async function sendOnce(thread, { clientId, text, attachments }) {
   if (full.length > MESSAGE_MAX) throw coded('BAD_REQUEST', '메시지가 너무 깁니다');
   const base = {
     key, ts: iso(deps.now()), role: 'user', kind: 'text', text: full, truncated: false, hidden: false,
-    clientId, ...(files.length ? { attachments: files.map((f, i) => ({ idx: i, name: f.name, path: f.path, mediaType: f.mediaType })) } : {}),
+    clientId, ...(auto ? { auto } : {}), ...(files.length ? { attachments: files.map((f, i) => ({ idx: i, name: f.name, path: f.path, mediaType: f.mediaType })) } : {}),
   };
 
   //  /exit·/quit·/clear 는 채팅이 직접 한다(2026-10-28 신고: 채팅에 쳐도 엔진에 글로 들어가 아무 일도 없고, 사이드바 행이 남았다).
@@ -960,6 +987,7 @@ async function sendOnce(thread, { clientId, text, attachments }) {
     throw e;
   }
   const wasIdle = !proc.turnOpen;
+  { const th = store.getThread(id); if (!auto && th && (th.cut || th.cutChain)) patch(id, { cut: null, cutChain: 0 }, { event: true }); }
   if (wasIdle) beginTurn(proc);
   const fresh = store.getThread(id);
   if (fresh && !fresh.titleSet && !fresh.title) patch(id, { title: oneLine(text || full, TITLE_MAX) }, { event: true });
@@ -1405,6 +1433,18 @@ const HANDLERS = {
 
   'conv.respond': respond,
 
+  async 'conv.continue'(p) {
+    const thread = need(p.threadId);
+    viewed(thread.id);
+    return continueCut(thread.id, { manual: true });
+  },
+
+  async 'conv.dismissCut'(p) {
+    const thread = need(p.threadId);
+    patch(thread.id, { cut: null }, { event: true });
+    return { ok: true };
+  },
+
   async 'conv.interrupt'(p) {
     const thread = need(p.threadId);
     const proc = live.get(thread.id);
@@ -1511,9 +1551,69 @@ async function rpc(method, params, ws) {
   return fn(p);
 }
 
+// ── 끊긴 작업 이어하기 ────────────────────────────────────────────────────────
+function setCut(id, { kind, turn, resetsAt = null }) {
+  const th = store.getThread(id);
+  if (!th) return;
+  const chain = kind === 'limit' ? (th.cutChain | 0) : 0;
+  const ra = resetsAt && resetsAt - deps.now() <= CUT_RESET_MAX_MS ? resetsAt : null;
+  patch(id, { cut: { kind, turn, at: deps.now(), resetsAt: ra, chain } }, { event: true });
+}
+
+/** 이어가기 한 번 — 사람의 버튼(manual) 또는 sweep 의 자동. 보낸 메시지는 auto 표식이 붙어 화면에서 작게 그린다. */
+async function continueCut(id, { manual = false } = {}) {
+  const th = store.getThread(id);
+  if (!th || !th.cut) return { ok: false, code: 'NO_CUT' };
+  const cut = th.cut;
+  const text = cut.kind === 'limit' ? CONTINUE_LIMIT_TEXT : CONTINUE_RESTART_TEXT;
+  const clientId = `auto-${cut.kind}-${cut.turn}-${cut.at}${manual ? '-m' : ''}`;
+  patch(id, { cut: null, cutChain: cut.kind === 'limit' ? (th.cutChain | 0) + 1 : 0 }, { event: true });
+  try {
+    heal(id);
+    return await sendInto(store.getThread(id), { clientId, text, auto: cut.kind });
+  } catch (e) {
+    // 못 보냈으면 다시 버튼으로 할 수 있게 되돌린다(자동은 다시 하지 않는다 — 같은 실패를 되풀이하지 않게).
+    patch(id, { cut: { ...cut, auto: false } }, { event: true });
+    notice(id, 'warn', 'CONTINUE_FAILED', `이어 가지 못했습니다: ${(e && e.message) || e}`);
+    return { ok: false, code: (e && e.code) || 'CONTINUE_FAILED' };
+  }
+}
+
+const continuing = new Set();
+function autoContinuePass(now) {
+  if (!autoContinueOn()) return;
+  let budget = 2; // 한 번에 몰리지 않게(Orca: 패스당 2건)
+  for (const th of store.listThreads()) {
+    if (budget <= 0) break;
+    const cut = th && th.cut;
+    if (!cut || cut.auto === false || continuing.has(th.id)) continue;
+    const proc = live.get(th.id);
+    if (proc && busy(proc)) continue;
+    let due = false;
+    if (cut.kind === 'restart') due = now - cut.at <= CUT_RESTART_AUTO_MS;
+    else if (cut.kind === 'limit') due = !!cut.resetsAt && now >= cut.resetsAt + CUT_RESET_GRACE_MS && (cut.chain | 0) < CUT_CHAIN_MAX;
+    if (cut.kind === 'restart' && !due) { patch(th.id, { cut: { ...cut, auto: false } }, { event: true }); continue; }
+    if (!due) continue;
+    budget -= 1;
+    continuing.add(th.id);
+    log(`끊긴 작업 자동 이어가기 thread=${th.id} kind=${cut.kind}`);
+    continueCut(th.id).catch(() => {}).finally(() => continuing.delete(th.id));
+  }
+}
+
+/** 기동 직후 — 충돌로 열린 채 남은 턴을 찾아 미결 정리(→ restart cut). */
+function healDangling() {
+  for (const th of store.listThreads()) {
+    if (th && (th.state === 'working' || th.state === 'waiting') && !live.has(th.id)) {
+      try { heal(th.id); store.patchThread(th.id, { state: 'stopped', pending: 0 }); } catch (_) { /* noop */ }
+    }
+  }
+}
+
 // ── 수명 ─────────────────────────────────────────────────────────────────────
 function sweep() {
   const now = deps.now();
+  try { autoContinuePass(now); } catch (e) { log(`이어가기 점검 실패: ${e && e.message}`); }
   for (const proc of [...live.values()]) {
     if (proc.exited || proc.stopping || busy(proc)) continue;
     if (proc.rcOn) continue;   // 원격 제어 중 = 다른 곳(claude.ai·앱)에서 쓰고 있다 — 유휴로 내리면 그쪽이 끊긴다
@@ -1532,6 +1632,7 @@ function closeBooks(reason) {
     if (proc.turnOpen) {
       proc.turnOpen = false;
       evs.push({ op: 'turn', phase: 'end', turn: proc.turn, ok: false, subtype: reason, interrupted: true });
+      if (reason === 'daemon_shutdown') store.patchThread(proc.id, { cut: { kind: 'restart', turn: proc.turn, at: deps.now(), resetsAt: null, chain: 0 } });
     }
     if (evs.length) store.appendMany(proc.id, evs);
     store.patchThread(proc.id, { state: 'stopped', pending: 0 });
@@ -1589,6 +1690,7 @@ function start(opts) {
   else store.configure({ now: () => deps.now(), pinned: (id) => live.has(id) });
   if (!enabled()) return module.exports;
   try { const r = store.prune(); if (r.pruned) log(`오래된 대화 ${r.pruned}건 정리`); } catch (e) { log(`정리 실패: ${e && e.message}`); }
+  try { healDangling(); } catch (e) { log(`미결 정리 실패: ${e && e.message}`); }
   if (!sweeper) {
     sweeper = setInterval(sweep, timings.sweepMs);
     if (sweeper.unref) sweeper.unref();
@@ -1623,7 +1725,7 @@ async function _reset() {
 module.exports = {
   CAP, MAX_LIVE, ERROR_CODES,
   configure, start, stop, shutdown, shutdownSync, detachAll, rpc, sessionsBrief, onSessionsChanged, touchSessions,
-  _internals: {
+  _internals: { autoContinuePass,
     live, sweep, heal, importSession, answersMap, alwaysLabelOf, composeText, stripTitleMark, publicThread, terminalOf, usageOf, refsOfEvent,
     _reset,
     get timings() { return timings; },

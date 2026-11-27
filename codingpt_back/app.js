@@ -85,7 +85,8 @@ app.post(
 app.use(require('./controllers/daemonController').previewCookieMiddleware);
 
 // 미들웨어 설정
-app.use(express.json({ limit: '10mb' }));
+// 웹훅 서명 검증(GitHub·Linear·Sentry·Vercel)은 받은 바이트 그대로가 필요하다 — 훅 경로만 원문을 남긴다.
+app.use(express.json({ limit: '10mb', verify: (req, _res, buf) => { if (req.originalUrl && req.originalUrl.startsWith('/api/v1/hooks/')) req.rawBody = buf; } }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // 로깅 미들웨어
@@ -180,6 +181,8 @@ const startServer = async () => {
     require('./services/channelService').resumeAll()
       .then((n) => { if (n) console.log(`[channel] AI 진행 ${n}개 다시 따라감`); })
       .catch((e) => console.warn('[channel] resume 실패:', e.message));
+    // 봇 스케줄(요일+시각 자동화) — setInterval 30초
+    try { require('./services/botService').start(); } catch (e) { console.warn('[bot] 스케줄러 시작 실패:', e.message); }
 
     // 구독 갱신 / 크레딧 만료 스위퍼 (cron 없이 setInterval)
     try {

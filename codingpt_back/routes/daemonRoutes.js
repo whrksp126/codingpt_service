@@ -76,6 +76,8 @@ router.post('/auto', accountAuth, daemonController.autoRpc);
 // 채팅 v2(conv.*) — 구조화 대화 엔진 RPC. 허용 표 = daemonController.CONV_RPC_OK(chat-v2-design.md §4·§8).
 //  accountAuth(JWT|deviceToken) — PC 앱은 deviceToken 으로 호출한다. 라이브는 데몬 conv_event → fanoutConvEvent.
 router.post('/conv', accountAuth, daemonController.convRpc);
+// MCP(mcp.*) — 봇 연결 화면. 허용 표 = daemonController.MCP_RPC_OK.
+router.post('/mcp', accountAuth, daemonController.mcpRpc);
 // 오케스트레이션(orch.*) — 원격 화면은 보기 + 답하기·결정·멈추기·정리·닫기만. 허용 표 = daemonController.ORCH_RPC_OK.
 router.post('/orch', accountAuth, daemonController.orchRpc);
 // 외부 연동 키 — PC 앱 설정과 같은 PC 의 데몬(`cpt external`)이 쓴다(deviceToken 이라 키는 그 PC 에 묶인다).

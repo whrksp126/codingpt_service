@@ -1,4 +1,5 @@
-// channels-view.js — 알림 채널 장소(state.view === "channels"). 폰 앱 ChannelsHost.tsx 와 같은 것.
+// channels-view.js — 봇 장소(state.view === "channels"; 2026-11-27 알림 채널 → 봇, Orca Bots 이식). 폰 앱 ChannelsHost.tsx·BotPanes.tsx 와 같은 것.
+//  방 = 탭 3개: 대화(봇과 주고받기) · 할 일(Needs you 결정) · 자동화(알림 착수·스케줄). 연결 모달 = 웹훅·서명·PC 의 공식 MCP.
 //  다른 서비스(서버·배치·CI)가 웹훅으로 보낸 알림이 채널(대화방)에 쌓이고, 그 방에서 바로 PC 의 에이전트에게 일을 시킨다.
 //  정본 = back /api/channels(PC 는 /api/daemon/channels — back_api 는 /api/daemon 아래만 연다). 실시간 = channel_event(ui-channel.js).
 //  색 규율: 심각도 색은 상태 신호라 쓴다(빨강=오류·주황=경고·초록=해결). 그 밖의 강조는 무채색 명암으로만.
@@ -19,7 +20,8 @@ const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</
 const LEVEL_TEXT = { info: "정보", success: "해결", warning: "경고", error: "오류", critical: "긴급" };
 const MODE_OPTS = [["default", "매번 승인"], ["acceptEdits", "수정은 자동"], ["plan", "계획만"]];
 const ERR_TEXT = {
-  DAEMON_OFFLINE: "PC 가 꺼져 있거나 CodingPT 가 연결되어 있지 않아요", NO_WORKSPACE: "AI 가 일할 PC·폴더를 먼저 정하세요",
+  DAEMON_OFFLINE: "PC 가 꺼져 있거나 CodingPT 가 연결되어 있지 않아요", NO_WORKSPACE: "봇이 일할 PC·폴더를 먼저 정하세요",
+  AGENT_UNAVAILABLE: "이 PC 에서 claude 를 찾지 못했어요", LOGIN_NOT_FOUND: "로그인이 만료됐어요. 다시 시작하세요", BAD_REQUEST: "입력을 확인해 주세요",
   AGENT_NOT_LOGGED_IN: "PC 의 에이전트에 로그인돼 있지 않아요", TIMEOUT: "PC 응답이 늦어요. 잠시 뒤 확인하세요",
   REQ_NOT_PENDING: "이미 처리된 요청이에요", EXTERNAL_DISABLED: "이 PC 는 외부 연동을 꺼 두었어요",
 };
@@ -28,7 +30,26 @@ const errText = (e) => t(ERR_TEXT[codeOf(e)] || "문제가 생겼어요. 다시 
 const call = (method, path, body, secs) => api.backApiAsync(method, BASE + path, body, secs || 20);
 
 // ── 상태 ──
-const st = { channels: [], loaded: false, selected: null, messages: new Map(), hasMore: new Map(), activity: new Map(), refs: [], draft: "" };
+const st = { channels: [], loaded: false, selected: null, messages: new Map(), hasMore: new Map(), activity: new Map(), refs: [], draft: "",
+  tab: "chat", items: new Map(), automations: new Map(), itemDrafts: new Map(), showClosed: false };
+const STATUS_TEXT = { needs_you: "결정 필요", in_progress: "진행 중", waiting: "기다리는 중", planned: "계획", done: "완료", canceled: "취소" };
+const OPEN = ["needs_you", "in_progress", "waiting", "planned"];
+const DAY_TEXT = ["일", "월", "화", "수", "목", "금", "토"];
+const MIN_LEVELS = [["info", "전부"], ["warning", "경고 이상"], ["error", "오류 이상"], ["critical", "긴급만"]];
+const PROVIDERS = [["", "전부"], ["github", "GitHub"], ["linear", "Linear"], ["sentry", "Sentry"], ["vercel", "Vercel"]];
+const needsYou = (id) => (st.items.get(id) || []).filter((x) => x.status === "needs_you").length;
+const avatar = (name, size) => `<span class="bot-av" style="--s:${size || 28}px">${esc((String(name || "").trim()[0] || "B").toUpperCase())}</span>`;
+function scheduleText(sc) {
+  if (!sc) return "";
+  const d = [...sc.days].sort().join(",");
+  const days = sc.days.length === 7 ? t("매일") : d === "1,2,3,4,5" ? t("평일") : d === "0,6" ? t("주말") : sc.days.map((x) => t(DAY_TEXT[x])).join("·");
+  return `${days} ${sc.time}`;
+}
+function eventText(f) {
+  const lv = MIN_LEVELS.find((x) => x[0] === ((f && f.minLevel) || "error"));
+  const pv = PROVIDERS.find((x) => x[0] === ((f && f.provider) || ""));
+  return [t("알림이 오면"), lv ? t(lv[1]) : "", pv && pv[0] ? pv[1] : ""].filter(Boolean).join(" · ");
+}
 let el = null;
 let modal = null;
 const sel = () => st.channels.find((c) => c.id === st.selected) || null;
@@ -51,7 +72,7 @@ function docsUrlOf(u) { const m = /^(https?:\/\/[^/]+)/.exec(u || ""); return `$
 /** 다른 프로젝트의 에이전트에게 붙여 넣을 안내문(폰 앱 agentGuideText 와 같은 글). */
 function agentGuideText(ch) {
   return [
-    `이 프로젝트에 문제가 생기면(서버 오류·크래시·배치 실패·헬스체크 실패 등) 내 CodingPT 앱의 「${ch.name}」 채널로 알림이 오게 해 줘.`,
+    `이 프로젝트에 문제가 생기면(서버 오류·크래시·배치 실패·헬스체크 실패 등) 내 CodingPT 앱의 「${ch.name}」 봇에게 알림이 가게 해 줘.`,
     `- 방법 문서(먼저 읽어): ${docsUrlOf(ch.webhookUrl)}`,
     `- 웹훅 URL: ${ch.webhookUrl}`,
     "  이 URL 은 비밀값이야. 서버 환경변수 CODINGPT_WEBHOOK_URL 에만 넣고 코드·커밋·로그에 남기지 마.",
@@ -84,6 +105,24 @@ async function loadMessages(id) {
     S.emit();
   } catch (e) { toast(errText(e)); }
 }
+async function loadItems(id) {
+  try { const r = await call("GET", `/${id}/items`); st.items.set(id, r.items || []); draw(); S.emit(); } catch (_) { /* 다음에 */ }
+}
+async function loadAutomations(id) {
+  try { const r = await call("GET", `/${id}/automations`); st.automations.set(id, r.automations || []); draw(); } catch (_) { /* 다음에 */ }
+}
+function putItem(it) {
+  const list = st.items.get(it.channelId) || [];
+  const i = list.findIndex((x) => x.id === it.id);
+  if (i >= 0) list[i] = it; else list.unshift(it);
+  st.items.set(it.channelId, list);
+}
+function putAuto(a) {
+  const list = st.automations.get(a.channelId) || [];
+  const i = list.findIndex((x) => x.id === a.id);
+  if (i >= 0) list[i] = a; else list.push(a);
+  st.automations.set(a.channelId, list);
+}
 function putMessage(m) {
   const list = st.messages.get(m.channelId);
   if (!list) return;
@@ -105,7 +144,10 @@ export function applyChannelEvent(ev) {
   else if (ev.kind === "channel_removed") {
     st.channels = st.channels.filter((c) => c.id !== Number(ev.channelId));
     if (st.selected === Number(ev.channelId)) st.selected = null;
-  } else if (ev.kind === "agent" && ev.channelId != null) {
+  } else if (ev.kind === "item" && ev.item) putItem(ev.item);
+  else if (ev.kind === "automation" && ev.automation) putAuto(ev.automation);
+  else if (ev.kind === "automation_removed") st.automations.set(Number(ev.channelId), (st.automations.get(Number(ev.channelId)) || []).filter((x) => x.id !== Number(ev.automationId)));
+  else if (ev.kind === "agent" && ev.channelId != null) {
     st.activity.set(ev.channelId, { state: ev.state || null, text: ev.activity || null });
     const c = st.channels.find((x) => x.id === ev.channelId);
     if (c) c.agentState = ev.state || null;
@@ -124,9 +166,9 @@ export function openChannels(channelId) {
 export function closeChannels() { S.setView("workspace"); }
 function selectChannel(id) {
   st.selected = id;
-  st.refs = []; st.draft = "";
+  st.refs = []; st.draft = ""; st.tab = "chat";
   draw();
-  if (id != null) void loadMessages(id);
+  if (id != null) { void loadMessages(id); void loadItems(id); void loadAutomations(id); }
 }
 
 // ── 그리기 ──
@@ -140,6 +182,7 @@ export function mountChannelsView(container) {
     if (e.target.classList?.contains("ch-input") && e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); void send(); }
   });
   el.addEventListener("input", (e) => {
+    if (e.target.classList?.contains("ch-item-input")) st.itemDrafts.set(e.target.dataset.n, e.target.value);
     if (e.target.classList?.contains("ch-input")) {
       st.draft = e.target.value;
       e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 160) + "px";
@@ -166,31 +209,33 @@ function draw(scrollEnd) {
   const ch = sel();
   const msgs = ch ? st.messages.get(ch.id) : null;
   const act = ch ? st.activity.get(ch.id) : null;
-  const sig = JSON.stringify([st.channels, st.selected, msgs, act, narrow, st.refs, i18n.getLang(), state.sidebarCollapsed]);
+  const sig = JSON.stringify([st.channels, st.selected, msgs, act, narrow, st.refs, i18n.getLang(), state.sidebarCollapsed, st.tab, ch ? st.items.get(ch.id) : null, ch ? st.automations.get(ch.id) : null, st.showClosed]);
   if (sig === lastSig && !scrollEnd) return;
   lastSig = sig;
   const body = el.querySelector(".ch-msgs");
   const atBottom = !body || body.scrollTop + body.clientHeight >= body.scrollHeight - 80;
   const focused = document.activeElement && document.activeElement.classList.contains("ch-input");
+  const focusedItem = document.activeElement && document.activeElement.classList.contains("ch-item-input") ? document.activeElement.dataset.n : null;
   const top = `<div class="tv-top">` +
     (narrow && ch ? `<button class="tv-back" data-act="back">${icons.chevronLeft({ size: 13 })}${esc(t("목록"))}</button>` : "") +
-    `<span class="tv-title">${esc(t("알림 채널"))}</span><span class="is-grow"></span>` +
-    `<button class="ic-btn tv-ic" data-act="new" title="${esc(t("새 채널"))}">${icons.plus({ size: 15 })}</button></div>`;
+    `<span class="tv-title">${esc(t("봇"))}</span><span class="is-grow"></span>` +
+    `<button class="ic-btn tv-ic" data-act="new" title="${esc(t("새 봇"))}">${icons.plus({ size: 15 })}</button></div>`;
   const list = (!narrow || !ch) ? `<div class="ch-list">${listHtml()}</div>` : "";
-  const room = ch ? roomHtml(ch, msgs, act) : (narrow ? "" : `<div class="ch-room ch-empty-room">${esc(t("왼쪽에서 채널을 고르세요"))}</div>`);
+  const room = ch ? roomHtml(ch, msgs, act) : (narrow ? "" : `<div class="ch-room ch-empty-room">${esc(t("왼쪽에서 봇을 고르세요"))}</div>`);
   el.innerHTML = top + `<div class="ch-body">${list}${room}</div>`;
   const input = el.querySelector(".ch-input");
   if (input) { input.value = st.draft; if (focused) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); } }
+  el.querySelectorAll(".ch-item-input").forEach((x) => { x.value = st.itemDrafts.get(x.dataset.n) || ""; if (focusedItem === x.dataset.n) { x.focus(); x.setSelectionRange(x.value.length, x.value.length); } });
   const nb = el.querySelector(".ch-msgs");
   if (nb && (atBottom || scrollEnd)) nb.scrollTop = nb.scrollHeight;
 }
 
 function listHtml() {
   if (st.loaded && !st.channels.length) {
-    return `<div class="ch-intro"><div class="ch-intro-ic">${icons.bell({ size: 28 })}</div>` +
-      `<div class="ch-intro-title">${esc(t("서비스 알림을 여기로 받으세요"))}</div>` +
-      `<div class="ch-intro-sub">${esc(t("채널을 만들면 웹훅 URL 이 생겨요. 서버 오류·배포 실패 같은 알림을 그 URL 로 보내면 폰으로 오고, 같은 방에서 바로 AI 에게 고치라고 시킬 수 있어요."))}</div>` +
-      `<button class="btn primary" data-act="new">${esc(t("채널 만들기"))}</button></div>`;
+    return `<div class="ch-intro"><div class="ch-intro-ic">${avatar("B", 44)}</div>` +
+      `<div class="ch-intro-title">${esc(t("일을 맡길 봇을 만드세요"))}</div>` +
+      `<div class="ch-intro-sub">${esc(t("봇은 내 PC 에서 일하는 담당 에이전트예요. 서비스 알림(오류·CI·배포)을 받아 스스로 조사하고 카톡처럼 보고하며, 결정이 필요하면 물어봐요. 정해진 시각에 일을 시킬 수도 있어요."))}</div>` +
+      `<button class="btn primary" data-act="new">${esc(t("봇 만들기"))}</button></div>`;
   }
   return st.channels.map((c) => {
     const dot = levelColor(c.lastLevel);
@@ -198,9 +243,9 @@ function listHtml() {
     const ast = a ? a.state : c.agentState;
     const working = ast === "working" || ast === "waiting";
     return `<button class="ch-row${c.id === st.selected ? " active" : ""}" data-ch="${c.id}">` +
-      `<span class="ch-av">${icons.bell({ size: 14 })}${dot && c.unreadCount ? `<i style="background:${dot}"></i>` : ""}</span>` +
+      `<span class="ch-av">${avatar(c.name, 32)}${needsYou(c.id) ? `<i style="background:var(--warn)"></i>` : (dot && c.unreadCount ? `<i style="background:${dot}"></i>` : "")}</span>` +
       `<span class="ch-row-main"><span class="ch-row-top"><b class="${c.unreadCount ? "unread" : ""}">${esc(c.name)}</b>${c.muted ? `<span class="ch-muted">${esc(t("무음"))}</span>` : ""}<span class="is-grow"></span><span class="ch-time">${esc(clock(c.lastMessageAt || c.createdAt))}</span></span>` +
-      `<span class="ch-row-sub"><span class="ch-prev">${esc(working ? t("AI 가 작업 중이에요") : (c.lastPreview || t("아직 알림이 없어요")))}</span>${c.unreadCount ? `<span class="wsr-badge">${c.unreadCount > 99 ? "99+" : c.unreadCount}</span>` : ""}</span></span></button>`;
+      `<span class="ch-row-sub"><span class="ch-prev">${esc(working ? t("일하는 중이에요") : needsYou(c.id) ? t("결정이 필요한 일 {n}개", { n: needsYou(c.id) }) : (c.lastPreview || t("아직 대화가 없어요")))}</span>${c.unreadCount ? `<span class="wsr-badge">${c.unreadCount > 99 ? "99+" : c.unreadCount}</span>` : ""}</span></span></button>`;
   }).join("");
 }
 
@@ -209,20 +254,26 @@ function roomHtml(ch, msgs, act) {
   const ast = act ? act.state : ch.agentState;
   const working = ast === "working";
   const waiting = ast === "waiting";
-  const head = `<div class="ch-head"><div class="ch-head-main"><b>${esc(ch.name)}</b>` +
-    `<span>${esc(ch.cwd ? `${t("AI 작업 폴더")} · ${ch.cwd.split("/").pop()}` : t("AI 작업 폴더 없음"))}${ch.muted ? ` · ${esc(t("무음"))}` : ""}</span></div>` +
-    `<button class="btn" data-act="connect">${icons.link({ size: 13 })}<span>${esc(t("연동"))}</span></button>` +
-    `<button class="ic-btn" data-act="settings" title="${esc(t("채널 설정"))}">${icons.dots({ size: 15 })}</button></div>`;
+  const head = `<div class="ch-head">${avatar(ch.name, 30)}<div class="ch-head-main"><b>${esc(ch.name)}</b>` +
+    `<span>${esc(ch.description || (ch.cwd ? `${t("작업 폴더")} · ${ch.cwd.split("/").pop()}` : t("일할 곳을 정하지 않았어요")))}${ch.muted ? ` · ${esc(t("무음"))}` : ""}</span></div>` +
+    `<button class="btn" data-act="connect">${icons.link({ size: 13 })}<span>${esc(t("연결"))}</span></button>` +
+    `<button class="ic-btn" data-act="settings" title="${esc(t("봇 설정"))}">${icons.dots({ size: 15 })}</button></div>`;
+  const n = needsYou(ch.id);
+  const tabs = `<div class="bot-tabs">${[["chat", t("대화")], ["items", n ? `${t("할 일")} ${n}` : t("할 일")], ["auto", t("자동화")]].map(([k, l]) =>
+    `<button class="bot-tab${st.tab === k ? " on" : ""}" data-act="tab" data-tab="${k}">${esc(l)}</button>`).join("")}</div>`;
+  if (st.tab === "items") return `<div class="ch-room">${head}${tabs}<div class="ch-msgs bot-pane">${itemsHtml(ch)}</div></div>`;
+  if (st.tab === "auto") return `<div class="ch-room">${head}${tabs}<div class="ch-msgs bot-pane">${autosHtml(ch)}</div></div>`;
   const rows = !msgs ? `<div class="ch-loading">${esc(t("불러오는 중…"))}</div>` : msgs.map((m) => msgHtml(ch, m)).join("");
-  const bar = working || waiting ? `<div class="ch-agentbar"><span class="ch-pulse"></span><span class="ch-agentbar-t">${esc(waiting ? t("AI 가 답을 기다려요") : (act && act.text ? `${t("AI 작업 중")} · ${act.text}` : t("AI 작업 중")))}</span>` +
+  const bar = working || waiting ? `<div class="ch-agentbar"><span class="ch-pulse"></span><span class="ch-agentbar-t">${esc(waiting ? t("봇이 답을 기다려요") : (act && act.text ? `${t("일하는 중")} · ${act.text}` : t("일하는 중")))}</span>` +
     (ch.threadId ? `<button class="btn ghost small" data-act="thread">${esc(t("대화 열기"))}</button>` : "") +
     (working ? `<button class="btn ghost small" data-act="interrupt">${esc(t("중단"))}</button>` : "") + `</div>` : "";
-  const setup = !ch.deviceId || !ch.cwd ? `<button class="ch-setup" data-act="settings">${icons.monitor({ size: 14 })}<span>${esc(t("AI 에게 맡기려면 일할 PC·폴더를 정하세요"))}</span><b>${esc(t("정하기"))}</b></button>` : "";
+  const setup = !ch.deviceId || !ch.cwd ? `<button class="ch-setup" data-act="settings">${icons.monitor({ size: 14 })}<span>${esc(t("봇이 일할 PC·폴더를 정하세요"))}</span><b>${esc(t("정하기"))}</b></button>` : "";
   const refMsgs = (msgs || []).filter((m) => st.refs.includes(m.id));
   const chips = refMsgs.length ? `<div class="ch-chips">${refMsgs.map((m) => `<span class="ch-chip">${levelColor(m.level) ? `<i style="background:${levelColor(m.level)}"></i>` : ""}<span>${esc(m.title || m.body || t("알림"))}</span><button data-act="unref" data-id="${m.id}">${icons.x({ size: 10 })}</button></span>`).join("")}</div>` : "";
-  const composer = `<div class="ch-composer">${setup}${chips}<div class="ch-box"><textarea class="ch-input" rows="1" placeholder="${esc(ch.cwd ? t("AI 에게 지시하기") : t("먼저 일할 PC·폴더를 정하세요"))}"></textarea>` +
+  const needsStrip = n ? `<button class="ch-setup" data-act="tab" data-tab="items"><i class="bot-dot"></i><span>${esc(t("결정이 필요한 일 {n}개", { n }))}</span><b>${esc(t("보기"))}</b></button>` : "";
+  const composer = `<div class="ch-composer">${setup}${needsStrip}${chips}<div class="ch-box"><textarea class="ch-input" rows="1" placeholder="${esc(ch.cwd ? t("{name}에게 메시지", { name: ch.name }) : t("먼저 일할 PC·폴더를 정하세요"))}"></textarea>` +
     `<button class="ch-send${st.draft.trim() ? " on" : ""}" data-act="send" title="${esc(t("보내기"))}">${icons.arrowUp({ size: 14 })}</button></div></div>`;
-  return `<div class="ch-room">${head}<div class="ch-msgs">${st.hasMore.get(ch.id) ? `<button class="btn ghost small ch-older" data-act="older">${esc(t("이전 알림 더 보기"))}</button>` : ""}${rows}</div>${bar}${composer}</div>`;
+  return `<div class="ch-room">${head}${tabs}<div class="ch-msgs">${st.hasMore.get(ch.id) ? `<button class="btn ghost small ch-older" data-act="older">${esc(t("이전 알림 더 보기"))}</button>` : ""}${rows}</div>${bar}${composer}</div>`;
 }
 
 function msgHtml(ch, m) {
@@ -236,18 +287,26 @@ function msgHtml(ch, m) {
       (m.title ? `<div class="ch-ev-title">${esc(m.title)}</div>` : "") +
       (m.body ? `<pre class="ch-ev-body${mono ? " mono" : ""}">${esc(m.body)}</pre>` : "") +
       ((m.fields || []).length ? `<div class="ch-fields">${m.fields.map((f) => `<span><em>${esc(f.label)}</em> ${esc(f.value)}</span>`).join("")}</div>` : "") +
-      `<div class="ch-ev-acts"><button class="btn small" data-act="ask" data-id="${m.id}">${picked ? icons.check({ size: 12 }) : icons.zap({ size: 12 })}<span>${esc(picked ? t("지시에 붙임") : t("AI 에게 맡기기"))}</span></button>` +
+      `<div class="ch-ev-acts"><button class="btn small" data-act="ask" data-id="${m.id}">${picked ? icons.check({ size: 12 }) : icons.zap({ size: 12 })}<span>${esc(picked ? t("지시에 붙임") : t("봇에게 맡기기"))}</span></button>` +
       (m.url ? `<button class="btn ghost small" data-act="url" data-url="${esc(m.url)}">${icons.external({ size: 12 })}<span>${esc(t("링크"))}</span></button>` : "") + `</div></div>`;
   }
+  if (m.role === "user" && m.meta && m.meta.auto) {
+    const a = m.meta.auto;
+    const head = a.kind === "schedule" ? `${t("예약 실행")} · ${a.name || ""}` : a.kind === "event" ? `${t("자동 착수")} · ${a.name || ""}` : a.kind === "item" ? t("할 일 #{n} 에 답함", { n: a.number }) : t("자동 지시");
+    return `<details class="ch-autoline"><summary>${esc(head)} · ${esc(clock(m.createdAt))}</summary><pre>${esc(m.body || "")}</pre></details>`;
+  }
+  if (m.role === "agent" && m.meta && m.meta.quiet) return `<div class="ch-sys">${esc(m.body || "")} · ${esc(clock(m.createdAt))}</div>`;
   if (m.role === "user") {
     const n = (m.meta && m.meta.refs && m.meta.refs.length) || 0;
     return `<div class="ch-user"><div class="ch-bubble">${esc(m.body || "")}</div><div class="ch-meta">${n ? esc(t("알림 {n}개와 함께", { n })) + " · " : ""}${esc(clock(m.createdAt))}</div></div>`;
   }
   if (m.role === "agent") {
     const tools = (m.meta && m.meta.tools) || 0;
-    return `<div class="ch-agent"><div class="ch-agent-h">${icons.claudeMark ? icons.claudeMark({ size: 12 }) : ""}<b>${m.meta && m.meta.agent === "codex" ? "Codex" : "Claude"}</b><span>${tools ? esc(t("도구 {n}번", { n: tools })) + " · " : ""}${esc(clock(m.createdAt))}</span></div>` +
-      `<div class="ch-agent-body chat-md">${renderMarkdown(m.body || "")}</div>` +
-      (ch.threadId && ch.threadId === m.threadId ? `<button class="btn ghost small" data-act="thread">${icons.chat({ size: 12 })}<span>${esc(t("전체 대화 보기"))}</span></button>` : "") + `</div>`;
+    const items = (m.meta && m.meta.items) || [];
+    return `<div class="ch-agent bot-msg">${avatar(ch.name, 28)}<div class="bot-msg-main"><div class="ch-agent-h"><b${m.level === "error" ? ' class="err"' : ""}>${esc(ch.name)}</b><span>${tools ? esc(t("도구 {n}번", { n: tools })) + " · " : ""}${esc(clock(m.createdAt))}</span></div>` +
+      `<div class="ch-agent-body chat-md bot-bubble${m.level === "error" ? " err" : ""}">${renderMarkdown(m.body || "")}</div>` +
+      (items.length ? `<button class="btn small" data-act="tab" data-tab="items"><i class="bot-dot"></i><span>${esc(t("결정하러 가기"))}</span></button>` : "") +
+      (ch.threadId && ch.threadId === m.threadId ? `<button class="btn ghost small" data-act="thread">${icons.chat({ size: 12 })}<span>${esc(t("전체 대화 보기"))}</span></button>` : "") + `</div></div>`;
   }
   const req = m.meta && m.meta.event === "request" ? m.meta.request : null;
   if (req) {
@@ -266,6 +325,99 @@ function msgHtml(ch, m) {
       (acts ? `<div class="ch-req-acts">${acts}</div>` : "") + `</div>`;
   }
   return `<div class="ch-sys${m.level === "error" ? " err" : ""}">${esc(m.body ? t(m.body) : "")} · ${esc(clock(m.createdAt))}</div>`;
+}
+
+// ── 할 일 ──
+function itemsHtml(ch) {
+  const list = st.items.get(ch.id);
+  if (!list) return `<div class="ch-loading">${esc(t("불러오는 중…"))}</div>`;
+  const open = OPEN.flatMap((s) => list.filter((x) => x.status === s).sort((a, b) => b.number - a.number));
+  const closed = list.filter((x) => !OPEN.includes(x.status));
+  const card = (it) => {
+    const needs = it.status === "needs_you";
+    const done = !OPEN.includes(it.status);
+    const notes = (it.notes || []).slice(-4);
+    const who = (a) => (a === "owner" ? t("나") : a === "bot" ? ch.name : t("시스템"));
+    return `<div class="bot-item${needs ? " needs" : ""}${done ? " done" : ""}">` +
+      `<div class="bot-item-top">${needs ? '<i class="bot-dot"></i>' : ""}<span>#${it.number} · ${esc(t(STATUS_TEXT[it.status] || it.status))}</span><span class="is-grow"></span><span class="ch-time">${esc(clock(it.updatedAt))}</span></div>` +
+      `<div class="bot-item-title">${esc(it.title)}</div>` +
+      (it.doneMeans ? `<div class="bot-item-sub">${esc(t("완료 조건"))} · ${esc(it.doneMeans)}</div>` : "") +
+      (needs && it.ask ? `<div class="bot-ask"><div>${esc(it.ask.question)}</div>${(it.ask.options || []).length ? `<div class="bot-ask-opts">${it.ask.options.map((o, i) =>
+        `<button class="btn small${it.ask.recommended === i + 1 ? " primary" : ""}" data-act="item-opt" data-n="${it.number}" data-v="${esc(o)}">${esc(o)}${it.ask.recommended === i + 1 ? ` · ${esc(t("추천"))}` : ""}</button>`).join("")}</div>` : ""}</div>` : "") +
+      (notes.length ? `<div class="bot-notes">${notes.map((x) => `<div><em>${esc(who(x.actor))}</em><div class="chat-md">${renderMarkdown(x.text)}</div></div>`).join("")}</div>` : "") +
+      (!done ? `<div class="bot-item-reply"><textarea class="ch-item-input tk-input" rows="1" data-n="${it.number}" placeholder="${esc(needs ? t("직접 답하기") : t("봇에게 의견 남기기"))}"></textarea><button class="btn small" data-act="item-send" data-n="${it.number}">${esc(t("보내기"))}</button></div>` +
+        `<div class="bot-item-acts">${it.url ? `<button class="btn ghost small" data-act="url" data-url="${esc(it.url)}">${esc(t("링크"))}</button>` : ""}<span class="is-grow"></span>` +
+        `<button class="btn ghost small" data-act="item-status" data-n="${it.number}" data-s="canceled">${esc(t("취소"))}</button><button class="btn small" data-act="item-status" data-n="${it.number}" data-s="done">${esc(t("완료로"))}</button></div>` : "") +
+      `</div>`;
+  };
+  const empty = !open.length ? `<div class="bot-empty"><b>${esc(t("열린 할 일이 없어요"))}</b><span>${esc(t("봇이 맡은 일과 주인의 결정이 필요한 일이 여기에 쌓여요. 알림 자동 착수를 켜 두면 알림마다 할 일이 생겨요."))}</span></div>` : "";
+  return empty + open.map(card).join("") +
+    (closed.length ? `<button class="btn ghost small" data-act="closed">${esc(st.showClosed ? t("접기") : t("끝난 일 {n}개", { n: closed.length }))}</button>${st.showClosed ? closed.map(card).join("") : ""}` : "");
+}
+
+// ── 자동화 ──
+function autosHtml(ch) {
+  const list = st.automations.get(ch.id) || [];
+  return `<p class="ch-p">${esc(t("알림이 오면 할 일을 만들고 바로 착수하거나, 정해진 요일·시각에 일을 시켜요. 실행은 봇의 PC 에서, 결과는 이 방과 폰 알림으로 와요."))}</p>` +
+    (!ch.deviceId || !ch.cwd ? `<p class="ch-p warn">${esc(t("봇이 일할 PC·폴더를 정해야 자동화가 돌아가요"))}</p>` : "") +
+    list.map((a) => `<div class="bot-auto">` +
+      `<div class="bot-auto-top"><button class="bot-auto-main" data-act="auto-edit" data-id="${a.id}"><b>${esc(a.name)}</b><span>${esc(a.kind === "schedule" ? scheduleText(a.schedule) : eventText(a.filter))}` +
+      `${a.kind === "schedule" && a.enabled && a.nextRunAt ? ` · ${esc(t("다음"))} ${esc(clock(a.nextRunAt))}` : ""}${a.lastRunAt ? ` · ${esc(t("최근"))} ${esc(clock(a.lastRunAt))}` : ""}</span></button>` +
+      `<label class="switch"><input type="checkbox" data-act="auto-toggle" data-id="${a.id}"${a.enabled ? " checked" : ""}><span></span></label></div>` +
+      (a.prompt ? `<div class="bot-auto-prompt">${esc(a.prompt)}</div>` : "") +
+      `<div class="bot-item-acts"><span class="is-grow"></span><button class="btn ghost small" data-act="auto-del" data-id="${a.id}">${esc(t("지우기"))}</button><button class="btn small" data-act="auto-run" data-id="${a.id}">${esc(t("지금 실행"))}</button></div></div>`).join("") +
+    `<button class="btn" data-act="auto-new">${icons.plus({ size: 13 })}<span>${esc(t("자동화 추가"))}</span></button>`;
+}
+
+async function itemAnswer(n, body) {
+  const ch = sel();
+  if (!ch) return;
+  try {
+    const r = await call("POST", `/${ch.id}/items/${n}/answer`, body, 40);
+    if (r.item) putItem(r.item);
+    if (body.text) { st.itemDrafts.delete(String(n)); toast(t("봇에게 전했어요")); }
+    draw();
+  } catch (e) { toast(errText(e)); void loadItems(ch.id); }
+}
+
+function openAutomation(ch, a) {
+  const tz = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Seoul"; } catch (_) { return "Asia/Seoul"; } })();
+  const kind0 = a ? a.kind : "event";
+  const opt = (v, n, cur) => `<option value="${esc(v)}"${String(cur) === String(v) ? " selected" : ""}>${esc(n)}</option>`;
+  const days = (a && a.schedule && a.schedule.days) || [1, 2, 3, 4, 5];
+  const m = modalShell(a ? t("자동화 고치기") : t("자동화 추가"),
+    (a ? "" : `<label class="ch-lbl">${esc(t("언제"))}</label><select class="tk-input" name="kind">${opt("event", t("알림이 오면"), kind0)}${opt("schedule", t("정해진 시각에"), kind0)}</select>`) +
+    `<label class="ch-lbl">${esc(t("이름"))}</label><input class="tk-input" name="name" maxlength="80" value="${esc(a ? a.name : "")}" placeholder="${esc(t("예: 오류가 오면 원인 조사"))}">` +
+    `<div class="k-event"><label class="ch-lbl">${esc(t("어떤 알림에"))}</label><select class="tk-input" name="minLevel">${MIN_LEVELS.map(([v, n]) => opt(v, t(n), (a && a.filter && a.filter.minLevel) || "error")).join("")}</select>` +
+    `<label class="ch-lbl">${esc(t("보낸 곳"))}</label><select class="tk-input" name="provider">${PROVIDERS.map(([v, n]) => opt(v, v ? n : t(n), (a && a.filter && a.filter.provider) || "")).join("")}</select>` +
+    `<div class="ch-hint">${esc(t("같은 문제(dedupeKey)가 반복되면 열린 할 일에 기록만 하고, 더 심각해졌을 때만 다시 깨워요. 10분에 6번까지만 자동 착수해요."))}</div></div>` +
+    `<div class="k-schedule"><label class="ch-lbl">${esc(t("요일"))}</label><div class="bot-days">${DAY_TEXT.map((d, i) => `<label><input type="checkbox" name="day" value="${i}"${days.includes(i) ? " checked" : ""}><span>${esc(t(d))}</span></label>`).join("")}</div>` +
+    `<label class="ch-lbl">${esc(t("시각(24시간)"))}</label><input class="tk-input" name="time" type="time" value="${esc((a && a.schedule && a.schedule.time) || "09:00")}" style="width:140px">` +
+    `<div class="ch-hint">${esc(t("시간대"))} · ${esc((a && a.schedule && a.schedule.tz) || tz)}</div></div>` +
+    `<label class="ch-lbl">${esc(t("봇에게 시킬 일"))}</label><textarea class="tk-input" name="prompt" rows="5" maxlength="4000" placeholder="${esc(t("예: 원인을 찾아 보고해. 코드는 내가 동의하기 전에는 고치지 마."))}">${esc(a ? a.prompt : "")}</textarea>` +
+    `<div class="ch-modal-f"><span class="is-grow"></span><button class="btn primary" data-save>${esc(t("저장"))}</button></div>`);
+  const kindOf = () => (a ? a.kind : m.querySelector("[name=kind]").value);
+  const sync = () => { m.querySelector(".k-event").hidden = kindOf() !== "event"; m.querySelector(".k-schedule").hidden = kindOf() !== "schedule"; };
+  sync();
+  m.querySelector("[name=kind]")?.addEventListener("change", sync);
+  m.querySelector("[data-save]").addEventListener("click", async (ev) => {
+    const kind = kindOf();
+    const body = { kind, name: m.querySelector("[name=name]").value.trim() || (kind === "schedule" ? t("예약 실행") : t("알림이 오면 착수")), prompt: m.querySelector("[name=prompt]").value.trim() };
+    if (kind === "schedule") {
+      const ds = [...m.querySelectorAll("[name=day]:checked")].map((x) => Number(x.value));
+      const time = m.querySelector("[name=time]").value;
+      if (!ds.length || !/^\d{2}:\d{2}$/.test(time)) { toast(t("요일과 시각을 정하세요")); return; }
+      body.schedule = { days: ds, time, tz: (a && a.schedule && a.schedule.tz) || tz };
+    } else {
+      const provider = m.querySelector("[name=provider]").value;
+      body.filter = { minLevel: m.querySelector("[name=minLevel]").value, ...(provider ? { provider } : {}) };
+    }
+    ev.target.disabled = true;
+    try {
+      const r = a ? await call("PATCH", `/${ch.id}/automations/${a.id}`, body) : await call("POST", `/${ch.id}/automations`, body);
+      putAuto(r.automation); closeModal(); draw(); toast(t("저장했어요"));
+    } catch (e) { ev.target.disabled = false; toast(errText(e)); }
+  });
 }
 
 // ── 동작 ──
@@ -347,6 +499,25 @@ function onClick(e) {
       el.querySelector(".ch-send")?.classList.toggle("on", !!st.draft.trim());
       break;
     }
+    case "tab": st.tab = b.dataset.tab; draw(true); break;
+    case "closed": st.showClosed = !st.showClosed; draw(); break;
+    case "item-opt": void itemAnswer(b.dataset.n, { text: b.dataset.v }); break;
+    case "item-send": { const v = (st.itemDrafts.get(b.dataset.n) || "").trim(); if (v) void itemAnswer(b.dataset.n, { text: v }); break; }
+    case "item-status": void itemAnswer(b.dataset.n, { status: b.dataset.s }); break;
+    case "auto-new": if (ch) openAutomation(ch, null); break;
+    case "auto-edit": { const a = ch && (st.automations.get(ch.id) || []).find((x) => x.id === Number(b.dataset.id)); if (a) openAutomation(ch, a); break; }
+    case "auto-toggle": {
+      const a = ch && (st.automations.get(ch.id) || []).find((x) => x.id === Number(b.dataset.id));
+      if (a) call("PATCH", `/${ch.id}/automations/${a.id}`, { enabled: b.checked }).then((r) => { putAuto(r.automation); draw(); }).catch((err) => { toast(errText(err)); draw(); });
+      break;
+    }
+    case "auto-run": if (ch) call("POST", `/${ch.id}/automations/${b.dataset.id}/run`, null, 75).then(() => toast(t("봇에게 맡겼어요"))).catch((err) => toast(errText(err))); break;
+    case "auto-del": {
+      const a = ch && (st.automations.get(ch.id) || []).find((x) => x.id === Number(b.dataset.id));
+      if (a) confirmDialog({ title: t("이 자동화를 지울까요?"), message: a.name, confirmLabel: t("지우기") }).then(() => call("DELETE", `/${ch.id}/automations/${a.id}`))
+        .then(() => { st.automations.set(ch.id, (st.automations.get(ch.id) || []).filter((x) => x.id !== a.id)); draw(); }).catch((err) => toast(errText(err)));
+      break;
+    }
     case "allow": void respond(b.dataset.id, "allow"); break;
     case "deny": void respond(b.dataset.id, "deny"); break;
     case "answer": {
@@ -384,14 +555,17 @@ function openSettings(ch) {
     if (!f.length) return `<div class="ch-hint">${esc(t("이 PC 에 워크스페이스가 없어요. 사이드바에서 먼저 추가하세요"))}</div>`;
     return `<select class="tk-input" name="cwd">${f.map((x) => opt(x.cwd, `${x.name} — ${x.cwd}`, cur || f[0].cwd)).join("")}</select>`;
   };
-  const m = modalShell(ch ? t("채널 설정") : t("새 알림 채널"),
-    `<label class="ch-lbl">${esc(t("이름"))}</label><input class="tk-input" name="name" maxlength="60" placeholder="${esc(t("예: 쇼핑몰 서버"))}" value="${esc(ch ? ch.name : "")}">` +
-    `<label class="ch-lbl">${esc(t("AI 가 일할 PC"))}</label><select class="tk-input" name="device">${opt("", t("정하지 않음(알림만 받기)"), deviceId == null ? "" : deviceId)}${pcs.map((d) => opt(d.id, `${d.name}${d.online ? "" : ` (${t("꺼져 있음")})`}`, deviceId)).join("")}</select>` +
+  const m = modalShell(ch ? t("봇 설정") : t("새 봇"),
+    (!ch ? `<label class="ch-lbl">${esc(t("무슨 일을 맡길까요"))}</label><select class="tk-input" name="template"><option value="">${esc(t("빈 봇 — 알림을 받고, 시키는 일을 해요"))}</option></select><div class="ch-hint bot-tpl-line"></div>` : "") +
+    `<label class="ch-lbl">${esc(t("이름"))}</label><input class="tk-input" name="name" maxlength="60" placeholder="${esc(t("예: 쇼핑몰 장애봇"))}" value="${esc(ch ? ch.name : "")}">` +
+    `<label class="ch-lbl">${esc(t("봇이 일할 PC"))}</label><select class="tk-input" name="device">${opt("", t("정하지 않음(알림만 받기)"), deviceId == null ? "" : deviceId)}${pcs.map((d) => opt(d.id, `${d.name}${d.online ? "" : ` (${t("꺼져 있음")})`}`, deviceId)).join("")}</select>` +
     `<div class="ch-dev-only"><label class="ch-lbl">${esc(t("프로젝트 폴더"))}</label><div class="ch-folder">${folderSel(deviceId, ch && ch.cwd)}</div>` +
-    `<label class="ch-lbl">${esc(t("AI 권한"))}</label><select class="tk-input" name="mode">${MODE_OPTS.map(([v, n]) => opt(v, t(n), (ch && ch.agentMode) || "default")).join("")}</select>` +
+    `<label class="ch-lbl">${esc(t("봇의 권한"))}</label><select class="tk-input" name="mode">${MODE_OPTS.map(([v, n]) => opt(v, t(n), (ch && ch.agentMode) || "default")).join("")}</select>` +
     `<label class="ch-check"><input type="checkbox" name="worktree"${ch && ch.useWorktree ? " checked" : ""}><span>${esc(t("새 브랜치에서 작업"))}<em>${esc(t("지금 작업 중인 폴더를 건드리지 않아요(git 저장소만)"))}</em></span></label></div>` +
     `<label class="ch-check"><input type="checkbox" name="muted"${ch && ch.muted ? " checked" : ""}><span>${esc(t("푸시 끄기"))}<em>${esc(t("알림은 쌓이고 폰은 울리지 않아요"))}</em></span></label>` +
-    `<div class="ch-modal-f">${ch ? `<button class="btn ghost danger" data-del>${esc(t("채널 지우기"))}</button>` : ""}<span class="is-grow"></span><button class="btn primary" data-save>${esc(ch ? t("저장") : t("만들기"))}</button></div>`);
+    (ch ? `<label class="ch-lbl">${esc(t("성격·일하는 방식(SOUL)"))}</label><textarea class="tk-input" name="soul" rows="5" maxlength="8000" placeholder="${esc(t("비워 두면 봇이 첫 일을 마친 뒤 스스로 적어요"))}">${esc(ch.soul || "")}</textarea>` +
+      `<label class="ch-lbl">${esc(t("기억(MEMORY)"))}</label><textarea class="tk-input mono" name="memory" rows="5" placeholder="${esc(t("봇이 대화에서 배운 규칙·선호가 줄 단위로 쌓여요. 직접 고쳐도 돼요"))}">${esc(ch.memory || "")}</textarea>` : "") +
+    `<div class="ch-modal-f">${ch ? `<button class="btn ghost danger" data-del>${esc(t("봇 지우기"))}</button>` : ""}<span class="is-grow"></span><button class="btn primary" data-save>${esc(ch ? t("저장") : t("만들기"))}</button></div>`);
   const devOnly = m.querySelector(".ch-dev-only");
   devOnly.hidden = deviceId == null;
   m.querySelector("[name=device]").addEventListener("change", (e) => {
@@ -400,6 +574,20 @@ function openSettings(ch) {
     m.querySelector(".ch-folder").innerHTML = folderSel(deviceId, null);
   });
   setTimeout(() => m.querySelector("[name=name]").focus(), 20);
+  const tplSel = m.querySelector("[name=template]");
+  let tpls = [];
+  if (tplSel) {
+    call("GET", "/templates").then((r) => {
+      tpls = r.templates || [];
+      tplSel.insertAdjacentHTML("beforeend", tpls.map((x) => `<option value="${esc(x.id)}">${esc(t(x.name))}</option>`).join(""));
+    }).catch(() => {});
+    tplSel.addEventListener("change", () => {
+      const x = tpls.find((y) => y.id === tplSel.value);
+      m.querySelector(".bot-tpl-line").textContent = x ? [t(x.line), ...x.events.map((e) => t(e)), ...x.schedules.map((e) => t(e))].join(" · ") : "";
+      const nm = m.querySelector("[name=name]");
+      if (x && !nm.value.trim()) nm.value = t(x.name);
+    });
+  }
   m.querySelector("[data-save]").addEventListener("click", async (ev) => {
     const name = m.querySelector("[name=name]").value.trim();
     if (!name) { m.querySelector("[name=name]").focus(); return; }
@@ -408,6 +596,8 @@ function openSettings(ch) {
       name, deviceId, cwd: deviceId && cwdEl ? cwdEl.value : null,
       agentMode: m.querySelector("[name=mode]").value, useWorktree: m.querySelector("[name=worktree]").checked, muted: m.querySelector("[name=muted]").checked,
     };
+    if (ch) { body.soul = m.querySelector("[name=soul]").value.trim() || null; body.memory = m.querySelector("[name=memory]").value.trim() || null; }
+    else if (tplSel && tplSel.value) { body.template = tplSel.value; try { body.tz = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (_) { /* noop */ } }
     ev.target.disabled = true;
     try {
       const r = ch ? await call("PATCH", `/${ch.id}`, body) : await call("POST", "", body);
@@ -417,7 +607,7 @@ function openSettings(ch) {
     } catch (e) { ev.target.disabled = false; toast(errText(e)); }
   });
   m.querySelector("[data-del]")?.addEventListener("click", async () => {
-    const ok = await confirmDialog({ title: t("이 채널을 지울까요?"), message: t("웹훅 URL 도 더 이상 받지 않아요. 지난 알림도 함께 지워져요."), confirmLabel: t("지우기") });
+    const ok = await confirmDialog({ title: t("이 봇을 지울까요?"), message: t("웹훅 URL 도 더 이상 받지 않아요. 대화·할 일·자동화도 함께 지워져요."), confirmLabel: t("지우기") });
     if (!ok) return;
     try {
       await call("DELETE", `/${ch.id}`);
@@ -431,15 +621,72 @@ function openConnect(ch) {
   const curl = `curl -X POST "${ch.webhookUrl}" -H 'Content-Type: application/json' -d '{"title":"테스트","text":"CodingPT 알림 연결 확인","level":"info"}'`;
   const block = (title, sub, value, key, mono) => `<div class="ch-cblock"><b>${esc(title)}</b><em>${esc(sub)}</em>` +
     `<button class="ch-copy${mono ? " mono" : ""}" data-copy="${key}"><span>${esc(value)}</span>${icons.copy({ size: 13 })}</button></div>`;
-  const m = modalShell(t("서비스 연동"),
-    `<p class="ch-p">${esc(t("이 URL 로 POST 하면 이 채널에 알림이 와요. 무엇을 언제 보낼지는 서비스 쪽에서 정해요."))}</p>` +
+  const m = modalShell(t("연결"),
+    `<p class="ch-p">${esc(t("이 URL 로 POST 하면 봇에게 알림이 와요. 무엇을 언제 보낼지는 서비스 쪽에서 정해요."))}</p>` +
     block(t("에이전트에게 맡기기(추천)"), t("그 프로젝트를 작업하는 AI 에게 이 안내를 붙여 넣으면 문서를 읽고 알아서 연결해요"), agentGuideText(ch), "guide", false) +
     block(t("웹훅 URL"), t("비밀값이에요. 서버 환경변수(CODINGPT_WEBHOOK_URL)에만 넣으세요"), ch.webhookUrl, "url", true) +
     block(t("바로 보내 보기(curl)"), t("터미널에 붙여 넣으면 테스트 알림이 와요"), curl, "curl", true) +
     `<div class="ch-modal-f"><button class="btn ghost" data-rotate>${esc(t("URL 새로 만들기"))}</button><span class="is-grow"></span>` +
-    `<button class="btn ghost" data-docs>${esc(t("문서"))}</button><button class="btn primary" data-test>${esc(t("테스트 알림 보내기"))}</button></div>`);
-  const vals = { guide: agentGuideText(ch), url: ch.webhookUrl, curl };
-  const msgs = { guide: t("안내문을 복사했어요"), url: t("URL 을 복사했어요"), curl: t("명령을 복사했어요") };
+    `<button class="btn ghost" data-docs>${esc(t("문서"))}</button><button class="btn primary" data-test>${esc(t("테스트 알림 보내기"))}</button></div>` +
+    `<div class="ch-cblock"><b>${esc(t("서비스에서 바로 받기"))}</b><em>${esc(t("같은 웹훅 URL 을 GitHub·Linear·Sentry·Vercel 에 그대로 넣으면 각 서비스의 원래 모양을 알아서 읽어요(CI 실패·이슈·오류·배포)."))}</em>` +
+    `<ul class="bot-prov"><li><b>GitHub</b> ${esc(t("저장소 Settings → Webhooks → Payload URL 에 웹훅 URL, Content type 은 application/json, Secret 에 아래 값. 이벤트는 Workflow runs·Issues·Pull requests 등."))}</li>` +
+    `<li><b>Linear</b> ${esc(t("Settings → API → Webhooks → 새 웹훅 URL 에 웹훅 URL. 서명 비밀값은 Linear 가 만든 값을 아래 칸에 넣으세요."))}</li>` +
+    `<li><b>Sentry</b> ${esc(t("Settings → Developer Settings → Internal Integration → Webhook URL 에 웹훅 URL, Alert Rule Action 을 켜세요. Client Secret 을 아래 칸에 넣으세요."))}</li>` +
+    `<li><b>Vercel</b> ${esc(t("Team Settings → Webhooks → 웹훅 URL, 이벤트는 Deployment. 만든 뒤 나오는 Secret 을 아래 칸에 넣으세요."))}</li></ul>` +
+    `<label class="ch-check"><input type="checkbox" data-secret${ch.webhookSecret ? " checked" : ""}><span>${esc(t("서명 검증"))}<em>${esc(t("켜면 서명이 맞는 요청만 받아요(URL 이 새도 안전)"))}</em></span></label>` +
+    (ch.webhookSecret ? `<button class="ch-copy mono" data-copy="secret"><span>${esc(ch.webhookSecret)}</span>${icons.copy({ size: 13 })}</button>` +
+      `<div class="bot-row"><input class="tk-input" data-own placeholder="${esc(t("서비스가 정한 비밀값 넣기"))}"><button class="btn small" data-own-save>${esc(t("바꾸기"))}</button></div>` : "") + `</div>` +
+    (ch.deviceId ? `<div class="ch-cblock"><div class="bot-row"><b class="is-grow">${esc(t("봇이 쓸 도구(공식 MCP)"))}</b><button class="btn ghost small" data-mcp-refresh>${esc(t("PC 에서 확인"))}</button></div>` +
+      `<em>${esc(t("각 서비스가 직접 운영하는 MCP 서버를 봇의 PC 에 있는 claude 에 붙여요. 로그인 정보는 그 PC 에만 남아요. 붙이면 봇이 이슈를 만들고, 배포 로그를 읽고, Slack 에 쓸 수 있어요."))}</em>` +
+      `<div class="bot-mcp"></div></div>` : ""));
+  // ── 서명·MCP ──
+  m.querySelector("[data-secret]").addEventListener("change", async (ev) => {
+    try { const r = await call("PATCH", `/${ch.id}`, { webhookSecret: ev.target.checked ? true : null }); upsert(r.channel); openConnect(r.channel); } catch (e) { toast(errText(e)); }
+  });
+  m.querySelector("[data-own-save]")?.addEventListener("click", async () => {
+    const v = m.querySelector("[data-own]").value.trim();
+    if (!v) return;
+    try { const r = await call("PATCH", `/${ch.id}`, { webhookSecret: v }); upsert(r.channel); openConnect(r.channel); toast(t("저장했어요")); } catch (e) { toast(errText(e)); }
+  });
+  const mcpBox = m.querySelector(".bot-mcp");
+  let catalog = []; let servers = null; let busy = "";
+  const mcp = (method, params, secs) => api.backApiAsync("POST", "/api/daemon/mcp", { method, params: params || {}, hostDeviceId: ch.deviceId }, secs || 100);
+  const findSrv = (c) => (servers || []).find((x) => x.name === c.id || (x.url && x.url.replace(/\/+$/, "") === c.url.replace(/\/+$/, "")));
+  const statusText = (x) => (x.status === "connected" ? t("연결됨") : x.status === "needs_auth" ? t("로그인 필요") : x.status === "failed" ? t("연결 실패") : t("확인 필요"));
+  const paintMcp = () => {
+    if (!mcpBox) return;
+    mcpBox.innerHTML = catalog.map((c) => {
+      const x = servers ? findSrv(c) : null;
+      const dot = x ? `<i class="bot-dot" style="background:${x.status === "connected" ? "var(--success)" : x.status === "failed" ? "var(--error)" : "var(--warn)"}"></i><span class="ch-time">${esc(statusText(x))}</span>` : "";
+      const act = servers == null ? "" : !x ? `<button class="btn small" data-mcp-add="${esc(c.id)}"${busy ? " disabled" : ""}>${esc(t("추가"))}</button>`
+        : (x.status === "needs_auth" || x.status === "failed") ? `<button class="btn small" data-mcp-login="${esc(x.name)}"${busy ? " disabled" : ""}>${esc(t("이 PC 에서 로그인"))}</button>`
+        : `<button class="btn ghost small" data-mcp-rm="${esc(x.name)}"${busy ? " disabled" : ""}>${esc(t("지우기"))}</button>`;
+      return `<div class="bot-mcp-row"><div class="is-grow"><div class="bot-row"><b>${esc(c.name)}</b>${dot}</div><em>${esc(t(c.what))}</em></div>${act}</div>`;
+    }).join("");
+  };
+  const refresh = async () => {
+    const b = m.querySelector("[data-mcp-refresh]"); if (b) b.disabled = true;
+    try { const r = await mcp("mcp.list", {}); servers = r.servers || []; } catch (e) { toast(errText(e)); } finally { if (b) b.disabled = false; }
+    paintMcp();
+  };
+  if (mcpBox) {
+    call("GET", "/templates").then((r) => { catalog = r.mcp || []; paintMcp(); }).catch(() => {});
+    m.querySelector("[data-mcp-refresh]").addEventListener("click", refresh);
+    mcpBox.addEventListener("click", async (ev) => {
+      const add = ev.target.closest("[data-mcp-add]"); const login = ev.target.closest("[data-mcp-login]"); const rm = ev.target.closest("[data-mcp-rm]");
+      if (!add && !login && !rm) return;
+      busy = "1"; paintMcp();
+      try {
+        if (add) { const c = catalog.find((x) => x.id === add.dataset.mcpAdd); await mcp("mcp.add", { name: c.id, url: c.url, transport: c.transport || "http" }, 60); toast(t("PC 에 추가했어요. 로그인이 필요하면 로그인하세요")); }
+        else if (login) { await mcp("mcp.loginStart", { name: login.dataset.mcpLogin, browser: true }, 30); toast(t("PC 의 브라우저에서 로그인을 마치세요")); }
+        else if (rm) await mcp("mcp.remove", { name: rm.dataset.mcpRm }, 60);
+      } catch (e) { toast(errText(e)); }
+      busy = "";
+      await refresh();
+    });
+  }
+  const vals = { guide: agentGuideText(ch), url: ch.webhookUrl, curl, secret: ch.webhookSecret || "" };
+  const msgs = { guide: t("안내문을 복사했어요"), url: t("URL 을 복사했어요"), curl: t("명령을 복사했어요"), secret: t("복사했어요") };
   m.querySelectorAll("[data-copy]").forEach((b) => b.addEventListener("click", async () => {
     try { await navigator.clipboard.writeText(vals[b.dataset.copy]); toast(msgs[b.dataset.copy]); } catch (_) { toast(t("복사하지 못했어요")); }
   }));

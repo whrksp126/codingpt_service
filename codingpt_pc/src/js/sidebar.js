@@ -521,7 +521,7 @@ function channelsRow() {
   const n = channelsUnread();
   const row = document.createElement("button");
   row.className = "pc-row channels-row" + (state.view === "channels" ? " active" : "");
-  row.innerHTML = `<span class="pc-ic">${icons.bell({ size: 15 })}</span><span class="pc-nm">${escapeHtml(i18n.t("알림 채널"))}</span>` + (n ? `<span class="wsr-badge">${n}</span>` : "");
+  row.innerHTML = `<span class="pc-ic">${icons.bot({ size: 15 })}</span><span class="pc-nm">${escapeHtml(i18n.t("봇"))}</span>` + (n ? `<span class="wsr-badge">${n}</span>` : "");
   row.addEventListener("click", () => { if (state.view !== "channels") openChannels(); });
   return row;
 }

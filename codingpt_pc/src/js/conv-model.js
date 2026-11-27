@@ -264,7 +264,7 @@ function applyTurn(st, ev) {
 /** 턴이 끝났다 — 완성되지 못한 초안(중단·프로세스 종료)은 메시지가 되지 않는다(§2.5). */
 function dropDrafts(st) { st.live.clear(); }
 
-const STATE_FIELDS = ['state', 'mode', 'model', 'usage', 'owner', 'ownerTid', 'title', 'titleSet', 'pending', 'preview'];
+const STATE_FIELDS = ['state', 'mode', 'model', 'usage', 'owner', 'ownerTid', 'title', 'titleSet', 'pending', 'preview', 'cut'];
 
 function applyOne(st, ev, backfill) {
   const seq = seqOf(ev);

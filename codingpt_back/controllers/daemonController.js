@@ -1323,7 +1323,7 @@ async function agentctlRpc(req, res) {
 //    읽으므로 THREAD_BUSY 류를 409 로 가르지 않는다 — 분기 근거는 상태 코드가 아니라 detail.code).
 const CONV_RPC_OK = new Map([
   ['conv.caps', 15000], ['conv.list', 15000], ['conv.create', 30000], ['conv.open', 30000], ['conv.since', 15000],
-  ['conv.before', 15000], ['conv.send', 30000], ['conv.respond', 15000], ['conv.interrupt', 15000], ['conv.set', 15000],
+  ['conv.before', 15000], ['conv.send', 30000], ['conv.respond', 15000], ['conv.interrupt', 15000], ['conv.continue', 30000], ['conv.dismissCut', 15000], ['conv.set', 15000],
   ['conv.stop', 15000], ['conv.remove', 15000], ['conv.detail', 15000], ['conv.commands', 15000],
   ['conv.toTerminal', 30000], ['conv.adopt', 30000], ['conv.file', 30000],
 ]);
@@ -1346,6 +1346,30 @@ async function convRpc(req, res) {
     }
     const err = e instanceof Error ? e : new Error(String(e));
     const code = err.message === RELAY_RPC_TIMEOUT_MSG ? 'TIMEOUT' : (err.code ? String(err.code) : 'CONV_ERROR');
+    err.code = code;
+    err.publicDetail = { code };
+    return errorResponse(res, err, 500);
+  }
+}
+// MCP(mcp.*) — 봇 '연결' 화면이 PC 의 claude 에 공식 MCP 서버를 붙이고 상태를 본다(데몬 mcp.js). 응답·오류 모양은 convRpc 와 같다.
+const MCP_RPC_OK = new Map([
+  ['mcp.list', 100000], ['mcp.add', 60000], ['mcp.remove', 60000],
+  ['mcp.loginStart', 30000], ['mcp.loginFinish', 45000], ['mcp.loginCancel', 15000],
+]);
+async function mcpRpc(req, res) {
+  try {
+    const b = req.body || {};
+    const method = String(b.method || '');
+    if (!MCP_RPC_OK.has(method)) return errorResponse(res, new Error('허용되지 않은 명령입니다.'), 400);
+    const params = b.params && typeof b.params === 'object' && !Array.isArray(b.params) ? b.params : {};
+    const result = await daemonRelayService.callRpc(req.user.id, method, params, MCP_RPC_OK.get(method), connOptsOf(req));
+    return successResponse(res, result);
+  } catch (e) {
+    if (e && e.message === 'DAEMON_OFFLINE') {
+      return errorResponse(res, Object.assign(new Error('PC 데몬이 연결되어 있지 않습니다.'), { publicDetail: { code: 'DAEMON_OFFLINE' } }), 409);
+    }
+    const err = e instanceof Error ? e : new Error(String(e));
+    const code = err.message === RELAY_RPC_TIMEOUT_MSG ? 'TIMEOUT' : (err.code ? String(err.code) : 'MCP_ERROR');
     err.code = code;
     err.publicDetail = { code };
     return errorResponse(res, err, 500);
@@ -2042,7 +2066,7 @@ module.exports = {
   surfaceRpc,
   taskRpc, _TASK_RPC_OK: TASK_RPC_OK, // Agent Tasks 평문 폴백 + 테스트 노출(허용 표 = 설계 §3.3)
   orchRpc, _ORCH_RPC_OK: ORCH_RPC_OK, // 오케스트레이션 평문 REST(사람 권한 메서드만 — orchestration-design.md)
-  convRpc, _CONV_RPC_OK: CONV_RPC_OK, // 채팅 v2 평문 REST + 테스트 노출(허용 표 = chat-v2-design.md §4·§8)
+  convRpc, mcpRpc, _CONV_RPC_OK: CONV_RPC_OK, // 채팅 v2 평문 REST + 테스트 노출(허용 표 = chat-v2-design.md §4·§8)
   autoRpc, _AUTO_RPC_OK: AUTO_RPC_OK, // 자동화 번들 평문 폴백 + 테스트 노출(허용 표 = automation-design.md §7.1)
   reviewGet, reviewPending, reviewSubmit, reviewCancel,
   daemonGetSession, daemonPutSession, daemonClaimWorkspaceHost, daemonProjectDetach, daemonProjectAttach, daemonReportGit, daemonDeleteWorkspace,

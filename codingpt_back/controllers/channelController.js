@@ -60,8 +60,11 @@ async function hookPost(req, res) {
     //  본문: JSON 객체 · 평문(text/plain) · 폼. 빈 JSON 이면 쿼리(?text=…)도 받는다(curl 한 줄용)
     let input = req.body;
     if (input == null || (typeof input === 'object' && !Object.keys(input).length)) input = req.query || {};
-    const r = await svc.ingest(ch, input, { via: 'webhook' });
-    return successResponse(res, { ok: true, channelId: ch.id, ...r });
+    //  서비스 원래 모양(GitHub·Linear·Sentry·Vercel)이면 해석 + 서명 검증. 알릴 것 없는 이벤트는 200 으로 받고 버린다.
+    const parsed = require('../services/botInbound').parse(req.headers, input, req.rawBody, ch.webhook_secret);
+    if (!parsed) return successResponse(res, { ok: true, channelId: ch.id, ignored: true });
+    const r = await svc.ingest(ch, parsed.input, { via: 'webhook', provider: parsed.provider });
+    return successResponse(res, { ok: true, channelId: ch.id, provider: parsed.provider, ...r });
   } catch (e) { return fail(res, e); }
 }
 async function hookInfo(req, res) {
@@ -92,7 +95,19 @@ const keySend = wrap(async (req, b) => {
   return { ok: true, channelId: ch.id, ...(await svc.ingest(ch, b, { via: 'api' })) };
 });
 
+// ── 봇(할 일·자동화·템플릿·MCP 카탈로그) ──────────────────────────────────────
+const bot = require('../services/botService');
+const items = wrap(async (req) => ({ items: await bot.listItems(uid(req), req.params.id, { all: req.query.all === '1' }) }));
+const itemAnswer = wrap(async (req, b) => ({ item: await bot.answerItem(uid(req), req.params.id, req.params.n, { text: b.text, status: b.status }) }));
+const automations = wrap(async (req) => ({ automations: await bot.listAutomations(uid(req), req.params.id) }));
+const automationCreate = wrap(async (req, b) => ({ automation: await bot.createAutomation(uid(req), req.params.id, b) }));
+const automationUpdate = wrap(async (req, b) => ({ automation: await bot.updateAutomation(uid(req), req.params.id, req.params.aid, b) }));
+const automationRemove = wrap(async (req) => bot.removeAutomation(uid(req), req.params.id, req.params.aid));
+const automationRun = wrap(async (req) => bot.runNow(uid(req), req.params.id, req.params.aid));
+const botTemplates = wrap(async () => ({ templates: bot.templates(), mcp: bot.mcpCatalog() }));
+
 module.exports = {
+  items, itemAnswer, automations, automationCreate, automationUpdate, automationRemove, automationRun, botTemplates,
   list, create, get, update, remove, rotate, read, messages, send, newConversation, respond, interrupt, test,
   hookPost, hookInfo, resolveHook, keyList, keyEnsure, keySend,
 };

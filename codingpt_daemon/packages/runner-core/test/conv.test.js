@@ -1124,3 +1124,50 @@ test('/remote-control(/rc) 는 채팅에서 원격 제어를 켜고(주소 안�
   assert.strictEqual(off.ok, true);
   assert.ok(!off.url);
 });
+
+// ── 끊긴 작업 이어하기(2026-11-27) ───────────────────────────────────────────
+test('사용 한도 — 실패 턴이 cut(limit, resetsAt) 을 남기고, 해제 뒤 sweep 이 "이어서" 를 자동으로 보낸다', async () => {
+  const { id } = await start('limitfail 0');
+  await waitTurnEnd(id, 1);
+  const th = await waitFor(() => { const t = store.getThread(id); return t && t.cut ? t : null; }, 3000, 'cut');
+  assert.strictEqual(th.cut.kind, 'limit');
+  assert.ok(th.cut.resetsAt > 1e12, 'resetsAt 은 ms');
+  // 앞선 테스트가 남긴 cut(재시작 등)이 패스 예산(2건)을 먼저 쓰지 않게 이 대화만 남긴다
+  for (const t of store.listThreads()) if (t.id !== id && t.cut) store.patchThread(t.id, { cut: null });
+  // 해제 시각 + 여유(60초)가 지난 것처럼 시계를 민다
+  const realNow = Date.now;
+  conv.configure({ now: () => realNow() + 2 * 60 * 1000 });
+  try {
+    conv._internals.sweep();
+    await waitTurnEnd(id, 2);
+  } finally { conv.configure({ now: () => realNow() }); }
+  const t2 = store.getThread(id);
+  assert.ok(!t2.cut, 'cut 은 이어가기와 함께 지워진다');
+  assert.strictEqual(t2.cutChain, 1);
+  const autoMsg = eventsOf(id).find((e) => e.op === 'msg' && e.msg.role === 'user' && e.msg.auto === 'limit');
+  assert.ok(autoMsg, '자동 이어가기 메시지에 auto 표식');
+});
+
+test('사용 한도 — 사람이 아무 말이나 보내면 cut 이 지워진다(자동 이어가기 취소)', async () => {
+  const { id } = await start('limitfail 3600');
+  await waitTurnEnd(id, 1);
+  await waitFor(() => store.getThread(id).cut, 3000, 'cut');
+  await rpc('conv.send', { threadId: id, clientId: cid(), text: 'say 직접' });
+  await waitTurnEnd(id, 2);
+  assert.ok(!store.getThread(id).cut);
+});
+
+test('conv.continue / conv.dismissCut — 버튼 경로', async () => {
+  const { id } = await start('limitfail 3600');
+  await waitTurnEnd(id, 1);
+  await waitFor(() => store.getThread(id).cut, 3000, 'cut');
+  const r0 = await rpc('conv.dismissCut', { threadId: id });
+  assert.ok(r0.ok && !store.getThread(id).cut);
+  const r1 = await rpc('conv.continue', { threadId: id });
+  assert.strictEqual(r1.code, 'NO_CUT');
+  store.patchThread(id, { cut: { kind: 'restart', turn: 1, at: Date.now(), resetsAt: null, chain: 0 } });
+  const r2 = await rpc('conv.continue', { threadId: id });
+  assert.ok(r2.ok);
+  await waitTurnEnd(id, 2);
+  assert.ok(eventsOf(id).some((e) => e.op === 'msg' && e.msg.auto === 'restart'));
+});
